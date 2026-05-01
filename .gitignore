@@ -1,0 +1,10 @@
+.venv/
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+trained_models/*.pt
+trained_models/*.pth
+*.egg-info/
+.vscode/

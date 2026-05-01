@@ -70,17 +70,19 @@ TSP's path through DG enforces pattern separation: even similar inputs activate 
 
 > **Understanding check:** Why does the MSP need to be slow? If it learned as fast as TSP, what would happen to community structure learning?
 
-### Projections table (Schapiro 2017, Fig. 2)
+### Projections table (Schapiro 2017, §2.a)
 
-| From | To | Type | Learned? |
-|------|----|------|---------|
-| ECin | CA1 | Feed-forward | Yes (MSP) |
-| ECin | DG | Feed-forward | Yes (TSP) |
-| DG | CA3 | Feed-forward | Yes (TSP) |
-| CA3 | CA3 | Recurrent | Yes (TSP) |
-| CA3 | CA1 | Feed-forward | Yes (TSP) |
-| CA1 | ECout | Feed-forward | Yes |
-| ECout | CA1 | Back-projection | Yes (plus-phase teaching signal) |
+| From | To | Type | Connectivity | Learned? |
+|------|----|------|-------------|---------|
+| ECin | CA1 | Feed-forward | Full (all-to-all) | Yes (MSP) |
+| ECin | DG | Feed-forward | Sparse: each DG unit receives from 25% of ECin | Yes (TSP) |
+| DG | CA3 | Feed-forward | Sparse: 5% (mossy fibre) | Yes (TSP) |
+| CA3 | CA3 | Recurrent | Full (all-to-all) | Yes (TSP) |
+| CA3 | CA1 | Feed-forward | Full (all-to-all) | Yes (TSP) |
+| CA1 | ECout | Feed-forward | Full (all-to-all) | Yes |
+| ECout | CA1 | Back-projection | Full (all-to-all) | Yes (plus-phase teaching signal) |
+
+**Input layer (Schapiro 2017 §2.a.ii):** A separate Input layer (not shown in Fig. 1) has one-to-one connections to ECin. Input is clamped here — this allows ECin to also receive ECout back-projections (the "big loop"), without the clamp disrupting the stimulus representation.
 
 ---
 
@@ -91,10 +93,11 @@ TSP's path through DG enforces pattern separation: even similar inputs activate 
 ### L_ECin — Entorhinal Cortex Input
 
 - Localist representation: one unit per item (n_items units)
-- Activity pattern: one-hot input for current item
 - No learning in ECin itself; it is the input driver
-- In minus phase: active with target item pattern
-- In plus phase: same as minus phase (ECin is always driven by the stimulus)
+- **Moving window (Schapiro 2017 §2.c):** ECin receives activity for both the current and previous item. Current item = 1.0 (clamped); previous item = 0.9 (decayed). This temporal asymmetry is the source of directional learning (forward bias).
+- **Separate Input layer:** A hidden Input layer (one-to-one with ECin) holds the clamped stimulus, allowing ECin to also receive ECout back-projections without conflict.
+- Inhibition: k = 2 (absolute; paper §2.a.ii — two units active at a time)
+- In all phases: same ECin pattern (stimulus does not change across minus/plus phases)
 
 ### L_DG — Dentate Gyrus
 
@@ -143,8 +146,9 @@ In plus phase: ECout back-projection also drives CA1.
 
 - Receives: CA1 (feed-forward)
 - Role: reconstruction of input pattern; provides plus-phase teaching signal via back-projection to CA1
-- In minus phase: CA1 → ECout, but ECout → CA1 back-projection carries minus-phase activity
-- In plus phase: ECout is clamped to the target item pattern → provides correction signal
+- Inhibition: k = 2 (absolute; paper §2.a.ii — matches ECin, two units active at a time)
+- In minus phases (Q1/Q2-Q3): settles freely from CA1 input; ECout → CA1 back-projection carries minus-phase activity
+- In plus phase (Q4): ECout clamped to the target item pattern → provides error-correction signal to CA1
 
 ---
 
@@ -176,13 +180,16 @@ Note: Unlike BasalGangliaACC, there is no DA modulation of gain here. Gain and t
 
 Lateral inhibition: only the top-k units remain active, others are suppressed.
 
-For each layer, k is set as a fraction of total units:
-| Layer | k fraction | Resulting sparsity |
-|-------|------------|-------------------|
-| DG | ~0.01 | ~1% |
-| CA3 | ~0.10 | ~10% |
-| CA1 | ~0.10 | ~10% |
-| ECout | ~0.10 | ~10% |
+ECin and ECout use an **absolute k=2** (paper §2.a.ii: "two units could be active at a time").
+DG, CA3, CA1 use a **fractional k** (proportion of layer size):
+
+| Layer | k | Resulting sparsity | Source |
+|-------|---|--------------------|--------|
+| ECin | 2 (absolute) | 2/n_items ≈ 13% | Schapiro (2017) §2.a.ii |
+| DG | ~0.01 × n_DG | ~1% | Schapiro (2017) §2.2 |
+| CA3 | ~0.10 × n_CA3 | ~10% | Schapiro (2017) |
+| CA1 | ~0.10 × n_CA1 | ~10% | Schapiro (2017) |
+| ECout | 2 (absolute) | 2/n_items ≈ 13% | Schapiro (2017) §2.a.ii |
 
 In PyTorch (hard kWTA, non-differentiable):
 ```python
@@ -206,24 +213,38 @@ This PyTorch implementation uses hard kWTA for Steps 1–8 (biologically faithfu
 
 Contrastive Hebbian Learning (CHL): the core learning mechanism in Leabra.
 
-**Two settling phases per trial:**
+**Three-phase trial structure — 100 cycles total (Schapiro 2017 §2.b-c):**
+
+Each trial = 4 quarters × 25 cycles. The two "minus phases" correspond to the two phases of the hippocampal theta oscillation (Hasselmo et al. 2002, ref [27]; Brankack et al. 1993, ref [28]):
 
 ```
-Minus phase: ECin active → CA1 settles via MSP + TSP prediction
-             ECout settles to CA1's predicted output (no clamping)
+Q1 — Minus phase 1 (encoding; cycles 1–25):
+     ECin → CA1 connection at full strength
+     CA3 → CA1 connection inhibited (or reduced)
+     Models theta trough: strong EC input to CA1 (external drive dominates)
+     Activity recorded as ActMid (cycle 25 in Go reimplementation)
 
-Plus phase:  ECin active (same) + ECout clamped to target item
-             CA1 resettles toward target; back-projection corrects
-             (Plus phase starts from minus phase final state; never reset between phases)
+Q2–Q3 — Minus phase 2 (retrieval; cycles 26–75):
+     CA3 → CA1 connection at full strength
+     ECin → CA1 connection reduced
+     Models theta peak: strong CA3 input to CA1 (internal recurrence dominates)
+     Activity recorded as ActM (cycle 75 in Go reimplementation)
+
+Q4 — Plus phase (correction; cycles 76–100):
+     ECout clamped to target item pattern
+     CA1 resettles toward target; ECout → CA1 back-projection corrects
+     Plus phase starts from Q2-Q3 final state; never reset between phases
+     Activity recorded as ActP (cycle 100)
 ```
 
-**Weight update:**
+**Weight update (applied after Q4, using ActM as minus and ActP as plus):**
 
 $$\Delta W_{ij} = \alpha \cdot (\hat{y}_j^+ \cdot \hat{y}_i^+ - \hat{y}_j^- \cdot \hat{y}_i^-)$$
 
-- $\hat{y}^+$: plus-phase activity
-- $\hat{y}^-$: minus-phase activity
+- $\hat{y}^+$: plus-phase (ActP) activity
+- $\hat{y}^-$: minus-phase (ActM, i.e. Q2-Q3) activity
 - $\alpha$: learning rate (MSP = 0.05, TSP = 0.4; from Go reimplementation)
+- Note: TSP learning rate is 10× MSP in the original emergent model (§2.b)
 
 **Learning rate differences (TSP faster than MSP):**
 MSP must accumulate statistical regularities slowly — fast learning would cause each episode to overwrite previous ones. TSP needs to bind individual events quickly before they are forgotten (Schapiro 2017 §2.3).
@@ -295,7 +316,7 @@ self._activity = (1 - self.tau) * self._activity + self.tau * new_act
 
 | Step | Build | File | Test | Status |
 |------|-------|------|------|--------|
-| 1 | `F_nxx1`, `F_kWTA` activation functions | `src/util.py` | `notebook/test_nxx1.ipynb` | not started |
+| 1 | `F_nxx1`, `F_kWTA` activation functions | `src/util.py` | `notebook/test_nxx1.ipynb` | **done** |
 | 2 | `L_ECin`, `L_ECout` | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
 | 3 | `L_DG` (sparse kWTA, pattern separation) | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
 | 4 | `L_CA3` (recurrent attractor, Euler) | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
@@ -422,16 +443,28 @@ EChipp_SL/
 | nxx1 gain γ | 600 | all | O'Reilly & Munakata (2000) |
 | nxx1 threshold θ | 0.25 | all | O'Reilly & Munakata (2000) |
 | Euler tau | 0.1 | all stateful | Leabra default |
-| DG sparsity | ~1% | DG | Schapiro (2017) §2.2 |
-| CA3 sparsity | ~10% | CA3 | Schapiro (2017) |
-| CA1 sparsity | ~10% | CA1 | Schapiro (2017) |
+| ECin/ECout k (absolute) | 2 | ECin, ECout | Schapiro (2017) §2.a.ii |
+| DG sparsity k_frac | ~0.01 | DG | Schapiro (2017) §2.2 |
+| CA3 sparsity k_frac | ~0.10 | CA3 | Schapiro (2017) |
+| CA1 sparsity k_frac | ~0.10 | CA1 | Schapiro (2017) |
+| ECin→DG connectivity | 25% (each DG unit receives from 25% of ECin) | ECin→DG | Schapiro (2017) §2.a.iii |
+| DG→CA3 connectivity | 5% (mossy fibre; sparse) | DG→CA3 | Schapiro (2017) §2.a.iii |
+| Previous item activity | 0.9 (decayed) | Input layer | Schapiro (2017) §2.c |
 | MSP learning rate | 0.05 | ECin→CA1 | Go reimplementation |
 | TSP learning rate | 0.4 | ECin→DG, DG→CA3, CA3→CA1 | Go reimplementation |
-| n_items | 15 | task | Schapiro (2017) Fig. 1 |
+| n_items | 15 | community task | Schapiro (2017) Fig. 3 |
 | n_communities | 5 | task | Schapiro (2017) Fig. 1 |
 | Items per community | 3 | task | Schapiro (2017) Fig. 1 |
-| Settling cycles (minus) | 25 | all | Go reimplementation |
-| Settling cycles (plus) | 25 | all | Go reimplementation |
+| Trials per epoch | 60 | community task | Schapiro (2017) §3.b |
+| Training epochs | 10 | community task | Schapiro (2017) §3.b |
+| Q1 settling cycles (minus1) | 25 | all | Go reimplementation |
+| Q2-Q3 settling cycles (minus2) | 50 | all | Go reimplementation |
+| Q4 settling cycles (plus) | 25 | all | Go reimplementation |
+| Total trial cycles | 100 | all | Schapiro (2017) §2.c |
+| ActMid recorded at | cycle 25 | all | Go reimplementation |
+| ActM recorded at | cycle 75 | all | Go reimplementation |
+| ActP recorded at | cycle 100 | all | Go reimplementation |
+| Network initializations | 500 | simulation | Schapiro (2017) §2.a.v |
 
 ---
 

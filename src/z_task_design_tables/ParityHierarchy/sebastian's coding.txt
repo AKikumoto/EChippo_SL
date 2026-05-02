@@ -1,0 +1,45 @@
+parity.input = [0 1   0 1   0 1; ... % I C L    Parity Task
+                   0 1   0 1   1 0; ... % I C H
+                   0 1   1 0   0 1; ... % I A L
+                   0 1   1 0   1 0; ... % I A H
+                   1 0   0 1   0 1; ... % O C L
+                   1 0   0 1   1 0; ... % O C H
+                   1 0   1 0   0 1; ... % O A L
+                   1 0   1 0   1 0]; % O A H
+
+hierarchy.input =   [0 1   0 1   0 1; ... % I C L     Hierarchy Task
+                     0 1   0 1   1 0; ... % I C H
+                     0 1   1 0   0 1; ... % I A L
+                     0 1   1 0   1 0; ... % I A H
+                     1 0   0 1   0 1; ... % O C L
+                     1 0   0 1   1 0; ... % O C H
+                     1 0   1 0   0 1; ... % O A L
+                     1 0   1 0   1 0];    % O A H  
+                   
+
+parity.task = zeros(size(parity.input, 1), 2); 
+parity.task(:, 1) = 1;
+
+hierarchy.task = zeros(size(parity.input, 1), 2); 
+hierarchy.task(:, 2) = 1;
+
+% all.task(1:size(all.input, 1)/2, 1) = 1;
+% all.task((size(all.input, 1)/2+1):end, 2) = 1;
+
+parity.output =   [0 1; ... % I C L    Parity Task
+                           1 0; ... % I C H
+                           1 0 ; ... % I A L
+                           0 1; ... % I A H
+                           1 0; ... % O C L
+                           0 1; ... % O C H
+                           0 1; ... % O A L
+                           1 0]; % O A H
+
+hierarchy.output = [0 1; ... % I C L     Hierarchy Task
+                               0 1; ... % I C H
+                               1 0; ... % I A L
+                               0 1; ... % I A H
+                               0 1; ... % O C L
+                               1 0; ... % O C H
+                               1 0; ... % O A L
+                               1 0];    % O A H  

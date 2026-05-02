@@ -13,9 +13,18 @@
 0. **Primary goal: understanding** — build the program step by step
 1. Reproduce Schapiro et al. (2017) hippocampal statistical learning model (hip-sl) in PyTorch
 2. Understand MSP/TSP dissociation at the level of equations and circuits
-3. Extend with SR(t) (temporally-structured successor representation) over conjunctive task space
-4. Generate testable predictions for the EfAb R21 grant (TUS × temporal generalization design)
+3. Apply the model to the K&M rule-action selection task (Kikumoto et al. 2025) to study how
+   the hippocampal circuit learns neural state transition, consolidation, and abstraction
+4. Generate testable EfAb predictions: conjunctive representation strength/stability, power-law
+   improvement, overnight cue-abstraction (see §10)
 5. Use the same modular structure as BasalGangliaACC so code can be shared/compared
+
+**SR(t) extension: DEFERRED.**
+The original plan was to extend with a temporally-structured SR, but value = SR × reward, and it
+is currently unclear whether the SR framework is the right account of neural state learning in the
+K&M task (where reward structure is trivial — all correct responses are equally rewarded). The
+EfAb phenomena (n_dynamic/n_stable, power-law, abstraction) may be better explained directly by
+Hebbian transition learning in MSP/TSP without a formal SR. See §11 for preserved SR notes.
 
 **Why PyTorch instead of emergent/Go?**
 - Emergent (original C++ implementation) is deprecated
@@ -317,19 +326,118 @@ self._activity = (1 - self.tau) * self._activity + self.tau * new_act
 | Step | Build | File | Test | Status |
 |------|-------|------|------|--------|
 | 1 | `F_nxx1`, `F_kWTA` activation functions | `src/util.py` | `notebook/test_nxx1.ipynb` | **done** |
-| 2 | `L_ECin`, `L_ECout` | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
+| 2 | `L_ECin`, `L_ECout` | `src/layer.py` | `notebook/test_layers.ipynb` | **done** |
 | 3 | `L_DG` (sparse kWTA, pattern separation) | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
 | 4 | `L_CA3` (recurrent attractor, Euler) | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
 | 5 | `L_CA1` (MSP + TSP convergence, Euler) | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
 | 6 | `CommunityGraphEnv`, `CommunityGraphDataset` | `src/tasks.py` | `notebook/test_task.ipynb` | not started |
 | 7 | `M_HipSL` assembly + CHL training loop | `src/model.py` | `notebook/test_full_model.ipynb` | not started |
 | 8 | Reproduce Schapiro 2017 (RSA, pattern completion) | notebooks | `notebook/test_full_model.ipynb` | not started |
-| 9 | `M_HipSL_SR`: SR(t) extension | `src/model.py` | `notebook/test_sr.ipynb` | not started |
-| 10 | EfAb behavioral readouts (n_dynamic/n_stable, power-law) | `src/` | `notebook/test_sr.ipynb` | not started |
+| 9 | `RuleActionEnv`, `RuleActionDataset` — K&M task with rate-coded ECin | `src/tasks.py` | `notebook/test_task.ipynb` | not started |
+| 10 | Train M_HipSL on K&M task; read out CA1 RSA vs. RSRCONJ matrix | notebooks | `notebook/test_full_model.ipynb` | not started |
 
 ---
 
-## 10. SR(t) Extension: EfAb Computational Framework
+## 10. EfAb Target Task: K&M Rule-Action Selection
+
+> **Source:** Kikumoto et al. (2025) *Cerebral Cortex*; Kikumoto & Mayr (2020)
+> **Tables:** `src/z_task_design_tables/RuleAction_4rules/`
+
+### Task structure
+
+4 action rules × 4 stimuli = 16 unique action contexts (conjunctions).
+Each conjunction (rule, stim) maps to exactly one response.
+The task-relevant representational hierarchy (from Kikumoto et al. 2025 RSA analysis):
+
+| Level | Code | What it captures |
+|-------|------|-----------------|
+| STIM | stimulus identity | which of 4 stimuli (shared across rules) |
+| RULE | rule identity | which of 4 rules (shared across stim) |
+| RESP | response identity | which of 4 buttons (shared S→R mappings) |
+| SRCONJ | S-R conjunction | 8 unique stimulus-response pairs |
+| RSRCONJ | rule-specific S-R conjunction | all 16 fully unique context codes |
+
+RSRCONJ is the key level: the context-specific conjunction that practice strengthens and
+overnight sleep makes cue-invariant (Kikumoto et al. 2025 Figs. 4–6).
+
+### z_task_design_tables
+
+`src/z_task_design_tables/` contains RSA model matrices as tab-separated 16×16 similarity
+matrices (one file per representational level). Each entry M[i,j] is the expected cosine
+similarity between conditions i and j if the brain fully encoded that level.
+
+Primary tables used (RuleAction_4rules/BASIC(4rules)/):
+- `STIM.txt`    — block diagonal; 4 blocks of 4 (0.25 within-stim, 0 across)
+- `RULE.txt`    — stripe diagonal; each rule appears in 4 conditions across all stim
+- `RESP.txt`    — groups by response identity
+- `SRCONJ.txt`  — 8 unique SR pairs; each condition shares 0.5 with one cross-rule partner
+- `RSRCONJ.txt` — 16 fully unique codes; each condition shares 0.5 with one cross-rule partner
+
+These matrices are the quantitative target for CA1 representations after training.
+
+### Why rate-coded (not one-hot) ECin representations are required
+
+**The problem with one-hot encoding:**
+If ECin assigns one unit per condition (16 one-hot units), all 16 conditions are perfectly
+equidistant in ECin space. There is no sequential statistical structure in the K&M task (unlike
+Schapiro's community graph), so MSP has no signal to learn community-like clustering in CA1.
+CA1 representations would remain equidistant regardless of training.
+
+**What is needed:**
+ECin must carry distributed, rate-coded activity patterns such that the similarity structure
+of ECin patterns already reflects the task feature hierarchy (STIM and RULE, at minimum).
+Then MSP Hebbian learning in CA1 can develop the higher-level conjunctive structure (RSRCONJ)
+by binding the co-occurring rule and stimulus features.
+
+**Two viable approaches:**
+
+Option A — Feature-coded ECin (recommended first step):
+```
+ECin = [rule_units (4) | stim_units (4)]  → 8-dimensional rate-coded input
+rule_units:  one-hot over 4 rules   (activity = 1.0 for active rule, 0 elsewhere)
+stim_units:  one-hot over 4 stimuli (activity = 1.0 for active stim, 0 elsewhere)
+```
+This gives natural RULE and STIM similarity without learned parameters.
+CA1 must learn to form conjunctive (RSRCONJ) representations via Hebbian CHL.
+
+Option B — Learned embedding projection:
+```
+ECin_emb = Linear(n_conditions=16, n_ECin)  [learned]
+```
+Embedding is updated during training; the model learns its own input geometry.
+More flexible but harder to interpret; consider after Option A is validated.
+
+**Connection to Kikumoto et al. (2025):**
+The paper shows that practice strengthens rule-specific S-R conjunctive representations
+(RSRCONJ level) in human EEG, and overnight sleep generalizes them across cue identity.
+EChipp_SL models this as:
+- MSP (slow) accumulates statistical structure of rule+stim co-occurrences → CA1 develops
+  RSRCONJ-like geometry (community structure analog)
+- TSP (fast) binds individual episodes (specific rule+stim→resp pairings)
+- The n_stable / n_dynamic distinction in Kikumoto 2025 maps onto:
+  - n_stable: converged CA1 representation at trial end (ActP)
+  - n_dynamic: within-trial CA1 trajectory (ActMid → ActM → ActP)
+
+### Moving window for K&M task
+
+In Schapiro's community graph, the moving window encodes current + previous item.
+For K&M, the equivalent is the within-trial sequence:
+- Q1 (ECin-dominant): rule presented alone → ECin encodes rule_units only
+- Q2-Q3 (CA3-dominant): stimulus added → ECin encodes rule_units + stim_units
+- Q4 (plus phase): response clamped to ECout
+
+The temporal asymmetry is now within a trial (rule → rule+stim), not across trials.
+This maps naturally onto the two minus phases: Q1 = rule encoding; Q2-Q3 = conjunction retrieval.
+
+---
+
+## 11. SR(t) Extension: EfAb Computational Framework [DEFERRED]
+
+> **Status: DEFERRED.** SR(t) is preserved here for reference but is not part of the current
+> implementation plan. The deferral reason: value = SR × reward. In the K&M task, reward
+> structure is trivial (all correct responses equally rewarded), so the SR-to-reward link does
+> not drive the representational phenomena of interest. Whether MSP's Hebbian CHL can be
+> reinterpreted as SR learning remains an open research question for a later phase.
 
 > **Source:** EfAb_grant_v2.md (April 2026); Stachenfeld et al. (2017); Momennejad (2020)
 
@@ -383,13 +491,17 @@ Open question: Can Schapiro's MSP learning mechanism be extended to learn SR(t) 
 
 ---
 
-## 11. Key Research Questions
+## 12. Key Research Questions
 
-1. Does MSP learn SR-structured transition representations, and do these match EC BOLD patterns?
-2. Can SR(t) with a temporal discount factor γ formally account for within-trial trajectory dynamics?
-3. Does γ increase with practice, as predicted by the EfAb abstraction hypothesis?
-4. What is the minimal hippocampal circuit architecture that can generate power-law improvement in CA1 representations?
-5. Can n_dynamic/n_stable convergence be read out from CA1 RSA without fMRI (i.e., just EEG RSA)?
+1. Does MSP Hebbian CHL on the K&M task produce CA1 representations whose RSA geometry
+   matches the RSRCONJ matrix after training?
+2. Does the CA1 within-trial trajectory (ActMid → ActM → ActP) stabilize earlier (closer to
+   ActMid) with more training — the n_dynamic → n_stable convergence pattern?
+3. Does overnight replay / weight consolidation (simulated by re-running CHL with reduced lr)
+   generalize CA1 representations across the cue dimension (cue-switch cost reduction)?
+4. What is the minimal circuit (MSP alone, TSP alone, or both) sufficient to produce each of
+   these effects?
+5. Can the model account for power-law improvement in ECout output probability across training?
 
 ---
 

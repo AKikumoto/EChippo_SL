@@ -132,7 +132,14 @@ class L_ECin(nn.Module):
         -------
         activity : FloatTensor, shape (n_items,) or (batch, n_items)
         """
-        raise NotImplementedError("Step 2: implement L_ECin.forward()")
+        # Schapiro (2017) §2.a.ii: each item = activation of one unit.
+        # Moving window (two items active) is assembled at the model level
+        # by calling forward() for current and previous items separately.
+        is_scalar = item_idx.dim() == 0
+        idx = item_idx.unsqueeze(0) if is_scalar else item_idx
+        act = torch.zeros(idx.shape[0], self.n_items, device=idx.device)
+        act.scatter_(1, idx.view(-1, 1), 1.0)
+        return act.squeeze(0) if is_scalar else act
 
 
 # =========================================================================
@@ -795,7 +802,24 @@ class L_ECout(nn.Module):
 
         In plus phase, use clamp() instead — do not call forward().
         """
-        raise NotImplementedError("Step 2: implement L_ECout.forward()")
+        # net input from CA1: W is (n_CA1, n_items), a_CA1 is (n_CA1,)
+        # Schapiro (2017) §2.a.iv; O'Reilly & Munakata (2000) Ch. 2.
+        net = a_CA1 @ self.W                   # (n_items,)
+        vm = F_nxx1(net)
+
+        # kWTA: absolute k=2 (Schapiro 2017 §2.a.ii)
+        # top-k threshold via kthvalue (stable under ties)
+        k_from_bottom = self.n_items - self.k + 1
+        threshold = torch.kthvalue(vm, k_from_bottom).values
+        new_act = vm * (vm >= threshold).float()
+
+        if self.use_euler:
+            # Euler: a(t) = (1−tau)*a(t−1) + tau*new_act
+            # O'Reilly & Munakata (2000) Ch. 2; tau=0.1 Leabra default
+            self._activity = (1.0 - self.tau) * self._activity + self.tau * new_act
+        else:
+            self._activity = new_act
+        return self._activity
 
     def update_weights(
         self,
@@ -808,4 +832,7 @@ class L_ECout(nn.Module):
         ΔW = lr * (y_ECout_plus ⊗ a_CA1_plus − y_ECout_minus ⊗ a_CA1_minus)
         O'Reilly & Munakata (2000) Ch. 4 Eq. 4.3; Schapiro (2017) §2.b.
         """
-        raise NotImplementedError("Step 2: implement L_ECout.update_weights()")
+        # W is (n_CA1, n_items): outer(a_CA1, a_ECout) has correct shape.
+        delta_plus  = torch.outer(a_CA1_plus,  a_ECout_plus)
+        delta_minus = torch.outer(a_CA1_minus, a_ECout_minus)
+        self.W.data += lr * (delta_plus - delta_minus)

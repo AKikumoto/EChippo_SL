@@ -88,14 +88,47 @@ Results averaged across networks (random effects model).
 
 ---
 
-## Step 2 — L_ECin, L_ECout (src/layer.py)
+## Step 2 — L_ECin, L_ECout (src/layer.py) ✓
 
-_Not yet started._
+### Understanding checks (answered before coding)
 
-Understanding check (answer before implementing):
-- What is the "separate Input layer" and why does it exist?
-- ECout in minus phase vs plus phase: what is the difference in the forward call?
-- k=2 for ECout means what, concretely, for a 15-item task?
+**Separate Input layer**: ECin must both receive the stimulus clamp and receive ECout
+back-projections (the "big loop"). A separate upstream Input layer absorbs the clamp,
+leaving ECin free to also accept ECout signals without conflict.
+Schapiro (2017) §2.a.ii: "Input was clamped in this layer so as to allow ECin to also
+receive input from ECout, completing the 'big loop' of the model."
+
+**ECout minus vs plus phase**:
+- Minus (Q1, Q2-Q3): `forward(a_CA1)` settles freely — network predicts current item.
+- Plus (Q4): `clamp(target_pattern)` overwrites `_activity` — no settling, just teaching signal.
+The clamped ECout activity propagates back to CA1 via `W_ECout` in `L_CA1`.
+
+**k=2 for ECout (n_items=15)**: 15 units total, only top 2 remain active, rest zeroed.
+2/15 ≈ 13% sparsity. Matches the moving window: exactly current + previous item units active.
+
+### L_ECin.forward()
+
+Returns one-hot (n_items,) float tensor for a given item index.
+Moving window assembly (current=1.0 + prev=0.9) is handled at the model level (M_HipSL),
+not inside L_ECin. The layer just produces one-hot patterns on request.
+
+### L_ECout.forward()
+
+Three steps per settling cycle (minus phases only):
+
+1. Net input: `net = a_CA1 @ W`  (W is (n_CA1, n_items))
+2. Activation: `vm = F_nxx1(net)` (gamma=600, theta=0.25)
+3. Inhibition: kWTA absolute k=2 via `kthvalue` threshold
+4. Euler update: `_activity = (1−tau)*_activity + tau*new_act`
+
+### L_ECout.update_weights()
+
+CHL rule (O'Reilly & Munakata 2000, Ch. 4 Eq. 4.3):
+```
+ΔW = lr × (outer(a_CA1_plus, a_ECout_plus) − outer(a_CA1_minus, a_ECout_minus))
+W.data += ΔW
+```
+W shape (n_CA1, n_items) → outer products have correct shape automatically.
 
 ---
 

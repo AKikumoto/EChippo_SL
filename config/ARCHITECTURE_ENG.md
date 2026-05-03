@@ -407,16 +407,64 @@ ECin_emb = Linear(n_conditions=16, n_ECin)  [learned]
 Embedding is updated during training; the model learns its own input geometry.
 More flexible but harder to interpret; consider after Option A is validated.
 
-**Connection to Kikumoto et al. (2025):**
-The paper shows that practice strengthens rule-specific S-R conjunctive representations
-(RSRCONJ level) in human EEG, and overnight sleep generalizes them across cue identity.
-EChipp_SL models this as:
-- MSP (slow) accumulates statistical structure of rule+stim co-occurrences → CA1 develops
-  RSRCONJ-like geometry (community structure analog)
-- TSP (fast) binds individual episodes (specific rule+stim→resp pairings)
-- The n_stable / n_dynamic distinction in Kikumoto 2025 maps onto:
-  - n_stable: converged CA1 representation at trial end (ActP)
-  - n_dynamic: within-trial CA1 trajectory (ActMid → ActM → ActP)
+### Kikumoto et al. (2025) — Key Findings
+
+**Paper:** Kikumoto, A. et al. (2025). Practice reshapes the geometry and dynamics of
+task-tailored representations. *Cerebral Cortex*.
+
+**Participants / design:** n=40, 3 consecutive days, EEG (64ch, 250 Hz after downsampling).
+Trial: ITI 300 ms → Cue 150 ms → blank 150 ms → Stimulus (until response).
+4 rules × 4 stimuli = 16 action contexts. Each rule cued by 2 synonymous words (e.g.,
+"vertical" / "updown") — cue identity is task-redundant. ~202 blocks/day.
+
+**Neural state:** Time-resolved EEG pattern (155 features: 5 frequency bands × 31 electrodes)
+at each time point → decoded by penalized LDA over 16 conditions → RSA against 5 model
+matrices (STIM, RULE, RESP, SRCONJ, RSRCONJ). RSA coefficients at each time point = strength
+of each representational level in the neural geometry.
+
+**Geometry finding (Fig. 4):**
+RSRCONJ representational dimensionality increases significantly across days
+(proportion of implementable binary separations over all 65,536 pairings of 16 conditions).
+No such increase for STIM, RULE, RESP, or SRCONJ. Only context-specific conjunctions are
+strengthened by practice.
+
+**Dynamics finding (Fig. 5–6):**
+Temporal generalization matrix (train at time t1, test at time t2):
+- **n_stable** = off-diagonal entries: strength of RSRCONJ representations that generalize
+  across time points (temporally stable, sustained activity).
+  Increases across days; stabilizes earlier in the trial (0–300 ms post-stimulus).
+- **n_dynamic** = on-diagonal entries: strength at matched train/test time (transient,
+  time-specific activity).
+  More n_dynamic within a session predicts *less* improvement (r < 0, Fig. 6B).
+More n_stable, less n_dynamic → faster and more stable performance (lower RT, lower SD).
+
+**Power-law improvement (Fig. 2):**
+RT and RT variability follow a power function of cumulative instances of each specific
+conjunction. Stronger RSRCONJ representations within a session predicted the asymptote of
+the power-law curve.
+
+**Overnight abstraction (Fig. 6A–C):**
+Cross-cue RSA (train decoder on one cue word, test on synonym) for RSRCONJ increases
+linearly across days. Correlates with reduced cue-switch costs in RT and SD.
+Interpretation: RSRCONJ representations become cue-invariant overnight (cue identity
+compressed to low-variance dimensions through sleep-dependent consolidation).
+
+**Hippocampus (Discussion, p. 13):**
+Not directly measured. Invoked as candidate for within-session changes:
+"changes in separation and stability... might be driven by... episodic encoding mechanisms
+through the hippocampus." Overnight abstraction attributed to replay/consolidation:
+"changes leading to abstraction over irrelevant features might require latent consolidation
+mechanisms, such as... replay... and synaptic downscaling... regulated over a night of sleep."
+
+**Mapping to EChipp_SL:**
+| Kikumoto 2025 phenomenon | EChipp_SL mechanism |
+|--------------------------|---------------------|
+| RSRCONJ geometry grows with practice | CA1 RSA → RSRCONJ matrix via MSP Hebbian CHL |
+| n_stable increases (earlier in trial) | ActMid→ActM→ActP trajectory stabilizes |
+| n_dynamic decreases | CA1 within-trial variability decreases |
+| Overnight cue-abstraction | Sleep consolidation: MSP re-runs with slow lr; cue dim. compressed |
+| Power-law improvement | ECout output probability for correct item increases across trials |
+| TSP episodic binding | Individual rule+stim→resp pairings stored in CA3 attractors |
 
 ### Moving window for K&M task
 

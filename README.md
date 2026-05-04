@@ -88,22 +88,23 @@ Key parameter differences from emergent original (Go reimplementation): KWTA →
 ```
 EChipp_SL/
 ├── src/
-│   ├── util.py           F_nxx1, F_kWTA
-│   ├── layer.py          L_ECin, L_ECout, L_DG, L_CA3, L_CA1
-│   ├── model.py          M_HipSL
-│   └── tasks.py          CommunityGraphEnv, RuleActionEnv
+│   ├── util.py                   F_nxx1, F_kWTA
+│   ├── layer.py                  L_ECin, L_ECout, L_DG, L_CA3, L_CA1
+│   ├── model.py                  M_HipSL  (not yet)
+│   ├── tasks.py                  CommunityGraphEnv, RuleActionEnv
+│   └── z_task_design_tables/     RSA model matrices (RuleAction, CITask, etc.)
 ├── notebook/
-│   ├── test_nxx1.ipynb           Step 1
-│   ├── test_layers.ipynb         Steps 2–5
-│   ├── test_task.ipynb           Step 6
-│   └── test_full_model.ipynb     Steps 7–10
+│   ├── test_nxx1.ipynb           Step 1: activation functions
+│   ├── test_RuleAction_4rules.ipynb  K&M task exploration
+│   └── test_WPtask.ipynb         WP task exploration
 ├── config/
-│   ├── ARCHITECTURE_ENG.md   Master document (equations, parameters, roadmap)
+│   ├── ARCHITECTURE_ENG.md       Master document (equations, parameters, roadmap)
 │   └── requirements.txt
 ├── manuscript/
-├── trained_models/
+│   ├── hippocampal_circuit.html  TUS reference card
+│   └── hippocampal_circuit_neutral.html  neutral reference card
 ├── visualizations/
-├── CLAUDE.md
+├── trained_models/
 └── README.md
 ```
 

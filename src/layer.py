@@ -1,9 +1,9 @@
 """
 layer.py: neural layers for the EC-hippocampus statistical learning circuit.
 
-| Layer   | Description               | Role                                          |
-|---------|---------------------------|-----------------------------------------------|
-| L_ECin  | Entorhinal cortex input   | Input driver; one-hot item encoding           |
+| Layer   | Description               | Role                                               |
+|---------|---------------------------|----------------------------------------------------|
+| L_ECin  | Entorhinal cortex input   | Float activity vector; Euler; big loop ready       |
 | L_DG    | Dentate gyrus             | Pattern separation; sparse kWTA (~1%)         |
 | L_CA3   | CA3 field                 | Pattern completion; recurrent attractor       |
 | L_CA1   | CA1 field                 | MSP + TSP convergence; output readout         |
@@ -13,8 +13,9 @@ Circuit from Schapiro et al. (2017) Phil. Trans. R. Soc. B, 372, 20160049.
 See config/ARCHITECTURE_ENG.md for full equations, parameters, and CHL settling policy.
 
 Two complementary pathways:
-  MSP (monosynaptic):   ECin → CA1           slow lr=0.05; learns statistical regularities
-  TSP (trisynaptic):    ECin → DG → CA3 → CA1  fast lr=0.4;  learns individual episodes
+  MSP (monosynaptic):   ECin → CA1                       slow lr=0.05; statistical regularities
+  TSP (trisynaptic):    ECin → DG → CA3 → CA1            fast lr=0.4;  episodic binding
+                        ECin → CA3 also direct (25%)     Schapiro 2017 §2.a.iii
 
 Schapiro (2017) §2: "the monosynaptic pathway—the pathway connecting entorhinal cortex
 directly to region CA1—was able to support statistical learning, while the trisynaptic
@@ -45,101 +46,113 @@ from util import F_nxx1, F_kWTA
 # L_ECin: ENTORHINAL CORTEX INPUT
 # =========================================================================
 # [Role]:
-#   Input driver. Encodes the current (and previous) item as a localist
-#   pattern of activity. ECin is always clamped to the stimulus — it does
-#   not settle freely and has no learnable weights.
+#   Input driver. Settles to an externally supplied float activity pattern.
+#   L_ECin does not construct the pattern — that is the model's job:
 #
-#   Schapiro (2017) §2.a.ii: "each item in the paradigm was represented by
-#   activation of one unit (with the number of units in ECin and ECout
-#   varying across paradigms)."
+#   Schapiro replication (M_HipSL):
+#     clamp = one_hot(curr)*1.0 + one_hot(prev)*0.9  (moving window §2.c)
+#   K&M task (M_HipSL_KM):
+#     clamp = T_TaskEmbedding(cond_idx)               (feature-coded)
 #
-# [Moving window — Schapiro (2017) §2.c]:
-#   ECin encodes two items simultaneously:
-#     current item  : activity = 1.0 (clamped)
-#     previous item : activity = 0.9 (decayed)
-#   All other units: 0.
-#   This temporal asymmetry introduces a forward learning bias
-#   (A → B is strengthened more than B → A).
+#   Both cases call the same L_ECin.forward(clamp_pattern).
 #
-#   §2.c: "presenting items to ECin using a moving window that encompassed
-#   the current and previous items. The current item was presented with full
-#   activity (clamped value = 1) and the previous stimulus were forced to
-#   maintain high activity (0.9) while all other units were forced to have
-#   no activity."
-#
-# [Separate Input layer — Schapiro (2017) §2.a.ii]:
-#   A hidden Input layer (not shown in Fig. 1) sits upstream of ECin.
-#   It has the same number of units as ECin and one-to-one connections.
-#   Clamping is applied here so that ECin can also receive ECout
-#   back-projections (the "big loop") without the clamp disrupting ECin.
+# [Big loop — Schapiro (2017) §2.a.ii]:
+#   ECin can also receive ECout back-projections via net_ecout.
 #   §2.a.ii: "Input was clamped in this layer so as to allow ECin to also
 #   receive input from ECout, completing the 'big loop' of the model."
+#   When net_ecout is supplied, use_euler should be True so ECin settles
+#   rather than snapping to the clamped value.
+#
+# [use_euler flag]:
+#   False (default): _activity = kWTA(net) each cycle. Schapiro behavior —
+#     ECin is fully clamped and does not need to settle.
+#   True: _activity = (1−tau)*_activity + tau*kWTA(net). Required when
+#     ECout back-projection drives ECin dynamics.
 #
 # [Inhibition — Schapiro (2017) §2.a.ii]:
-#   k = 2 (absolute count, not fraction).
+#   k = 2 absolute. For n_items=15: 2/15 ≈ 13% active.
 #   §2.a.ii: "ECin and ECout each had inhibition set so that two units
 #   could be active at a time (k = 2), unless otherwise noted."
-#   For the community structure task (n_items=15): 2/15 ≈ 13% active.
-#   [Note: k=2 matches moving window — exactly current + previous item.]
-#
-# [Inputs]:
-#   - item_idx : int or LongTensor — index of the current item (0..n_items-1)
-#
-# [Outputs]:
-#   - activity : (n_items,) one-hot float tensor (or moving-window two-hot)
 #
 # [Learning]:
-#   None. ECin is a fixed input driver.
-#
-# [Connections]:
-#   ECin → CA1  (MSP: monosynaptic pathway; W_ECin in L_CA1; lr_MSP = 0.05)
-#   ECin → DG   (TSP first leg; W in L_DG; lr_TSP = 0.4)
-#
-# [Notes]:
-#   - ECin is stateless: no _activity buffer, no Euler integration needed.
-#   - In all phases (Q1, Q2-Q3, Q4): same ECin clamping.
-#     The stimulus does not change across minus/plus phases within a trial.
-#   - Community structure task: n_items = 15 (Schapiro 2017 Fig. 1; §3.b).
-#   - For associative inference (Schapiro 2017 §3.c): n_items = 9.
-#     §3.c: "we lowered inhibition to k=3 in ECin and ECout when testing."
+#   None. ECin carries no learnable weights.
 
 class L_ECin(nn.Module):
-    """Entorhinal cortex input: item index → one-hot activity pattern.
+    """Entorhinal cortex input: float activity pattern with optional Euler settling.
 
-    Stateless. Call forward(item_idx) to get the activity vector.
+    Accepts any pre-built float vector (one-hot, feature-coded, or embedded).
+    One-hot/moving-window construction belongs at the model level, not here.
     """
 
-    def __init__(self, n_items: int):
+    def __init__(
+        self,
+        n_units: int,
+        k: int = 2,
+        tau: float = 0.1,
+        use_euler: bool = False,
+    ):
         """
         Parameters
         ----------
-        n_items : int
-            Total number of items in the task (e.g., 15 for Schapiro 2017).
-            Schapiro (2017) Fig. 1: 15-item community graph (5 communities × 3).
+        n_units : int
+            Number of ECin units.
+            Schapiro community task: 15 (= n_items; Schapiro 2017 Fig. 1).
+            K&M feature-coded: 8 (4 rule units + 4 stim units).
+        k : int
+            Absolute kWTA count. Schapiro (2017) §2.a.ii: k=2.
+        tau : float
+            Euler rate. Leabra default: 0.1 (O'Reilly & Munakata 2000).
+            Only used when use_euler=True.
+        use_euler : bool
+            False: pure clamp — _activity snaps to kWTA(clamp + ecout).
+            True: Euler settling — needed when ECout back-projection is active.
         """
         super().__init__()
-        self.n_items = n_items
+        self.n_units   = n_units
+        self.k         = k
+        self.tau       = tau
+        self.use_euler = use_euler
+        self._activity = torch.zeros(n_units)
 
-    def forward(self, item_idx: torch.Tensor) -> torch.Tensor:
-        """Return one-hot activity for item_idx.
+    def reset(self):
+        """Zero _activity. Call once per trial before Q1."""
+        self._activity = torch.zeros(self.n_units, device=self._activity.device)
+
+    def forward(
+        self,
+        clamp_pattern: torch.Tensor,
+        net_ecout: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Settle ECin for one cycle.
 
         Parameters
         ----------
-        item_idx : LongTensor, shape (,) or (batch,)
-            Item index (0-based).
+        clamp_pattern : FloatTensor (n_units,)
+            External stimulus pattern. Constructed by the caller:
+            Schapiro → one_hot(curr)*1.0 + one_hot(prev)*0.9
+            K&M      → T_TaskEmbedding(cond_idx)
+        net_ecout : FloatTensor (n_units,), optional
+            ECout back-projection net input (big loop).
+            Schapiro (2017) §2.a.ii. Default None (clamp-only mode).
 
         Returns
         -------
-        activity : FloatTensor, shape (n_items,) or (batch, n_items)
+        _activity : FloatTensor (n_units,)
         """
-        # Schapiro (2017) §2.a.ii: each item = activation of one unit.
-        # Moving window (two items active) is assembled at the model level
-        # by calling forward() for current and previous items separately.
-        is_scalar = item_idx.dim() == 0
-        idx = item_idx.unsqueeze(0) if is_scalar else item_idx
-        act = torch.zeros(idx.shape[0], self.n_items, device=idx.device)
-        act.scatter_(1, idx.view(-1, 1), 1.0)
-        return act.squeeze(0) if is_scalar else act
+        net = clamp_pattern if net_ecout is None else clamp_pattern + net_ecout
+
+        # kWTA — absolute k; Schapiro (2017) §2.a.ii
+        k_from_bottom = self.n_units - self.k + 1
+        threshold = torch.kthvalue(net, k_from_bottom).values
+        new_act = net * (net >= threshold).float()
+
+        if self.use_euler:
+            # Euler integration; O'Reilly & Munakata (2000) Ch. 2
+            self._activity = (1.0 - self.tau) * self._activity + self.tau * new_act
+        else:
+            self._activity = new_act
+
+        return self._activity
 
 
 # =========================================================================

@@ -59,11 +59,12 @@ This PyTorch implementation follows the Go reimplementation values unless otherw
 ## 3. Circuit Architecture
 
 ```
-ECin ──────────────────────────────► CA1 ──► ECout
- │                    [MSP: direct]    ▲
- │                                     │
- └──► DG ──────────► CA3 ─────────────┘
-       [TSP: episodic]
+ECin ─────────────────────────────────────────────► CA1 ──► ECout
+ │                         [MSP: direct, lr=0.05]    ▲
+ ├──► DG ──(5% mossy fiber)──┐                       │
+ │    [~1% sparse]            ├──► CA3 (↺) ───────────┘
+ └────────(25%, direct)───────┘   [~10%]   [TSP: episodic, lr=0.4]
+           [Schapiro 2017 §2.a.iii]
 ```
 
 ### Two Complementary Pathways
@@ -71,7 +72,7 @@ ECin ─────────────────────────
 | Pathway | Route | Function | Learning |
 |---------|-------|----------|----------|
 | **MSP** (Monosynaptic) | ECin → CA1 | Statistical regularities; smooth overlap | Slow Hebbian |
-| **TSP** (Trisynaptic) | ECin → DG → CA3 → CA1 | Episodic binding; unique events | Fast Hebbian |
+| **TSP** (Trisynaptic) | ECin → DG → CA3 → CA1; also ECin → CA3 direct (25%) | Episodic binding; unique events | Fast Hebbian |
 
 **Core insight (Schapiro 2017 §2):**
 MSP's direct ECin → CA1 connection, trained slowly, develops graded representations where items that frequently co-occur end up with similar CA1 representations — it learns the graph's community structure.
@@ -476,6 +477,41 @@ For K&M, the equivalent is the within-trial sequence:
 
 The temporal asymmetry is now within a trial (rule → rule+stim), not across trials.
 This maps naturally onto the two minus phases: Q1 = rule encoding; Q2-Q3 = conjunction retrieval.
+
+### T_TaskEmbedding: ECin input geometry as a simulation parameter
+
+The K&M task has no sequential community structure (unlike Schapiro), so the question of what
+geometry ECin carries into the hippocampus is a design choice, not a given. Two experimental
+modes are supported via `T_TaskEmbedding` in `src/tasks.py`:
+
+**Mode 1 — Fixed feature-coded input (Option A, default for model testing):**
+ECin = concatenated feature one-hots from `design_to_units()`. No learned parameters.
+STIM and RULE similarity are encoded in the input; conditions are equidistant at the RSRCONJ level.
+CA1 must discover conjunctive structure entirely through Hebbian CHL.
+Use to test whether the model generates RSRCONJ geometry from a flat start.
+
+**Mode 2 — RSA-initialized embedding (`T_TaskEmbedding` with `rsa_matrix`, for Kikumoto matching):**
+ECin = `T_TaskEmbedding` output initialized via eigendecomposition of a target RSA matrix.
+Input geometry already reflects the target representational level (e.g., RULE or STIM).
+The initialization uses MDS-style eigendecomposition: eigenvectors of the RSA matrix, scaled by
+sqrt(eigenvalues), give an embedding where cosine similarities match the target RSA structure.
+
+Use this mode to:
+- Match early-training EEG from Kikumoto 2025, where STIM and RULE geometry are already present
+  before practice reshapes RSRCONJ — CA1 does not start from a blank slate in real data
+- Ask how much of CA1's RSRCONJ learning is driven by input geometry vs. Hebbian statistics alone
+- Simulate the effect of varying input correlation structure on conjunctive representation formation
+
+**`freeze_on` flag:**
+`freeze_on=True` freezes the embedding after initialization — ECin geometry is a fixed input
+manipulation, not a learned variable. `freeze_on=False` allows the embedding to update during
+training, approximating Option B (learned projection).
+
+**Design rationale:**
+The goal is to decode and confirm that CA1 neural states can become abstract (cue-invariant,
+RSRCONJ-structured). To validate the model against Kikumoto 2025, ECin must carry the same
+feature correlation structure that human EEG carries at trial onset. T_TaskEmbedding with
+RSA initialization makes this input geometry a controllable simulation parameter.
 
 ---
 

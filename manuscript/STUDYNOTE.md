@@ -46,10 +46,12 @@ Why high DG sparsity: forces orthogonal representations → minimizes CA3 interf
 ### Circuit
 
 ```
-ECin ──────────────────────────► CA1 ──► ECout
- │              [MSP]              ▲
- └──► DG ──► CA3 ─────────────────┘
-       [TSP]
+ECin ─────────────────────────────────────────► CA1 ──► ECout
+ │                      [MSP]                    ▲
+ ├──► DG ──(5% mossy)──┐                        │
+ │    [~1%]             ├──► CA3 (↺) ────────────┘
+ └────(25%, direct)─────┘   [~10%]    [TSP]
+      [§2.a.iii]
 ```
 
 MSP (monosynaptic): ECin → CA1, slow lr=0.05, learns statistical regularities.

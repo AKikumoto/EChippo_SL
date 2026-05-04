@@ -1,57 +1,75 @@
 # EChipp_SL — Hippocampal Statistical Learning Model
 
-PyTorch reimplementation of Schapiro et al. (2017) hippocampal statistical learning (hip-sl) model, originally written in C++ emergent / Go. Extended with a temporally-structured successor representation SR(t) for the EfAb R21 grant project on causal mechanisms of efficiency and abstraction in context-dependent action selection.
-
-## Project Goal
-
-The ultimate aims are to:
-
-1. **Understand every line of code** — primary goal; the model is built step by step with paper citations at every equation
-2. **Reproduce Schapiro et al. (2017)** — MSP/TSP dissociation, community structure learning, pattern completion vs. pattern separation
-3. **Implement SR(t) extension** — temporally-structured successor representation over conjunctive task space (EfAb computational framework)
-4. **Generate EfAb predictions** — n_dynamic/n_stable convergence, power-law improvement, overnight abstraction as SR(t) compression
-
-> **Foundational Principle:**
-> Before writing code, always open and read the corresponding paper section.
-> Every numerical value is marked with its source (paper name, page, equation number).
-> Only after you can explain "why this value?" in your own words, move to coding.
+PyTorch reimplementation of Schapiro et al. (2017) hippocampal statistical learning model, originally written in C++ emergent / Go. Extended with neural state(t) analysis over conjunctive task subspaces.
 
 ---
 
 ## Target Model: Schapiro et al. (2017)
 
-**Source:** Schapiro, A. C., Turk-Browne, N. B., Botvinick, M. M., & Norman, K. A. (2017). Complementary learning systems within the hippocampus: a neural network modelling approach to reconciling episodic memory with statistical learning. *Philosophical Transactions of the Royal Society B*, 372, 20160049.
+Schapiro, A. C., Turk-Browne, N. B., Botvinick, M. M., & Norman, K. A. (2017). Complementary learning systems within the hippocampus: a neural network modelling approach to reconciling episodic memory with statistical learning. *Philosophical Transactions of the Royal Society B*, 372, 20160049. ([original Go code](https://github.com/schapirolab/hip-sl))
 
-**Original code:** https://github.com/schapirolab/hip-sl (Go/emergent reimplementation)
-
-**Core idea:** Hippocampus contains two complementary pathways that serve different learning functions:
+Hippocampus contains two complementary pathways that serve different learning functions:
 
 | Pathway | Route | Function |
 |---------|-------|----------|
-| **MSP** (Monosynaptic Pathway) | ECin → CA1 | Statistical learning of transition structure |
-| **TSP** (Trisynaptic Pathway) | ECin → DG → CA3 → CA1 | Episodic binding of individual events |
+| **MSP** (Monosynaptic) | ECin → CA1 | Statistical learning of transition structure |
+| **TSP** (Trisynaptic) | ECin → DG → CA3 → CA1 | Episodic binding of individual events |
 
-MSP learns slowly via Hebbian plasticity and develops smooth, overlapping representations of items that co-occur — capturing statistical regularities. TSP uses DG pattern separation and CA3 pattern completion to bind unique episodes without interference.
+MSP learns slowly via Hebbian plasticity, developing smooth overlapping representations that capture statistical regularities. TSP uses DG pattern separation and CA3 pattern completion to bind unique episodes without interference.
 
 ---
 
 ## Circuit Architecture
 
 ```
-ECin ──────────────────────────────► CA1 ──► ECout
- │                                    ▲         (MSP: direct, slow learning)
- │                                    │
- └──► DG (sparse, pattern separate) ──►  CA3 ──► CA1
-       (TSP: episodic binding, fast)
+ECin ─────────────────────────────────────────────── CA1 ──► ECout
+ │                        (MSP: direct, lr=0.05)    ▲
+ ├──► DG ──(5% mossy fiber)──┐                      │
+ │    (pattern sep., ~1%)     ├──► CA3 (↺) ──────────┘
+ └────────(25%, direct)───────┘   (pattern comp., ~10%)  (TSP, lr=0.4)
+           Schapiro 2017 §2.a.iii
 ```
 
-| Layer | Description | Role |
-|-------|-------------|------|
-| **ECin** | Entorhinal cortex input | Pattern of activity for current item |
-| **DG** | Dentate gyrus | Pattern separation (~1% sparsity); episodic uniqueness |
-| **CA3** | CA3 field | Pattern completion; recurrent attractor dynamics |
-| **CA1** | CA1 field | Convergence of MSP (ECin) and TSP (CA3) signals |
-| **ECout** | Entorhinal cortex output | Reconstruction target; plus-phase teaching signal |
+<!-- inline neutral card — explicit colors, no CSS variables -->
+<div style="font-size:13px;color:#1a1a1a;padding:8px 0;font-family:sans-serif">
+<svg width="100%" viewBox="0 0 680 205" role="img" style="margin-bottom:12px">
+  <defs>
+    <marker id="at2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <marker id="am2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <marker id="ao2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#5F5E5A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <rect x="14" y="8" width="14" height="3" rx="1" fill="#1D9E75"/>
+  <text x="34" y="13" style="font-size:11px;fill:#085041;font-weight:500">Trisynaptic pathway (TSP) — EC Layer II → DG → CA3 → CA1</text>
+  <line x1="14" y1="26" x2="28" y2="26" stroke="#534AB7" stroke-width="1.5" stroke-dasharray="4 2"/>
+  <text x="34" y="30" style="font-size:11px;fill:#3C3489;font-weight:500">Monosynaptic pathway (MSP) — EC Layer III → CA1 direct</text>
+  <g><rect x="14" y="80" width="80" height="90" rx="8" fill="#E1F5EE" stroke="#085041" stroke-width="0.5"/><text x="54" y="112" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#085041;font-weight:500">ECin</text><text x="54" y="130" text-anchor="middle" style="font-size:10px;fill:#085041">L.II → TSP</text><text x="54" y="145" text-anchor="middle" style="font-size:10px;fill:#085041">L.III → MSP</text></g>
+  <g><rect x="152" y="50" width="84" height="60" rx="8" fill="#EAF3DE" stroke="#27500A" stroke-width="0.5"/><text x="194" y="72" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#27500A;font-weight:500">DG</text><text x="194" y="90" text-anchor="middle" style="font-size:10px;fill:#27500A">pattern sep.</text><text x="194" y="104" text-anchor="middle" style="font-size:10px;fill:#27500A">sparse codes</text></g>
+  <g><rect x="298" y="50" width="84" height="60" rx="8" fill="#FAEEDA" stroke="#633806" stroke-width="0.5"/><text x="340" y="72" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#633806;font-weight:500">CA3</text><text x="340" y="90" text-anchor="middle" style="font-size:10px;fill:#633806">pattern comp.</text><text x="340" y="104" text-anchor="middle" style="font-size:10px;fill:#633806">recurrent net</text></g>
+  <g><rect x="444" y="80" width="84" height="90" rx="8" fill="#EEEDFE" stroke="#26215C" stroke-width="0.5"/><text x="486" y="112" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#26215C;font-weight:500">CA1</text><text x="486" y="130" text-anchor="middle" style="font-size:10px;fill:#26215C">TSP + MSP</text><text x="486" y="145" text-anchor="middle" style="font-size:10px;fill:#26215C">converge</text></g>
+  <g><rect x="592" y="80" width="74" height="90" rx="8" fill="#F1EFE8" stroke="#2C2C2A" stroke-width="0.5"/><text x="629" y="112" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#2C2C2A;font-weight:500">ECout</text><text x="629" y="130" text-anchor="middle" style="font-size:10px;fill:#2C2C2A">→ neocortex</text></g>
+  <path d="M94 105 Q122 105 122 80 L152 80" fill="none" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#at2)"/>
+  <text x="123" y="72" text-anchor="middle" style="font-size:10px;fill:#085041">perforant path</text>
+  <line x1="236" y1="80" x2="298" y2="80" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#at2)"/>
+  <text x="266" y="72" text-anchor="middle" style="font-size:10px;fill:#085041">mossy fiber</text>
+  <path d="M382 80 Q412 80 412 110 L444 110" fill="none" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#at2)"/>
+  <text x="415" y="72" text-anchor="middle" style="font-size:10px;fill:#085041">Schaffer coll.</text>
+  <path d="M94 118 Q196 148 298 98" fill="none" stroke="#1D9E75" stroke-width="1.2" marker-end="url(#at2)"/>
+  <text x="196" y="163" text-anchor="middle" style="font-size:10px;fill:#085041">direct (25%)</text>
+  <path d="M94 148 Q268 200 444 148" fill="none" stroke="#534AB7" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#am2)"/>
+  <text x="268" y="199" text-anchor="middle" style="font-size:10px;fill:#3C3489">temporoammonic path</text>
+  <line x1="528" y1="125" x2="592" y2="125" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#ao2)"/>
+  <text x="666" y="205" text-anchor="end" style="font-size:10px;fill:#888">Schapiro et al. 2017</text>
+</svg>
+
+| Region | Computational role | Schapiro model parameters |
+|--------|-------------------|--------------------------|
+| **ECin** | Grid cells (L.II → TSP; L.III → MSP); sole cortical gateway | 15 units; k=2 absolute; moving window curr=1.0 prev=0.9; no learned weights |
+| **DG** | Pattern separation; sparse orthogonal codes | ~1% sparsity (k=0.01); ECin→DG 25%; DG→CA3 5% mossy fiber; TSP lr=0.4 |
+| **CA3** | Pattern completion; recurrent attractor (Hopfield) | ~10% sparsity (k=0.10); CA3→CA3 recurrent; TSP lr=0.4 |
+| **CA1** | TSP + MSP convergence; temporal integration | ~10% sparsity; MSP lr=0.05 (slow); TSP lr=0.4 (fast); Q1: ECin / Q2–Q3: CA3 / Q4: ECout clamp |
+| **ECout** | Reconstruction target; plus-phase teaching signal | k=2 absolute; Q4 clamped → ECout→CA1 back-projection |
+
+</div>
 
 ### CHL Learning (Contrastive Hebbian Learning)
 
@@ -61,56 +79,7 @@ Two phases per trial:
 
 Weight update: `ΔW ∝ y_plus - y_minus` (Schapiro 2017; O'Reilly & Munakata 2000)
 
-### Key parameter differences from original emergent model (from Go reimplementation)
-- KWTA inhibition replaced by FFFB inhibition in Go version
-- MSP learning rate: 0.02 → 0.05; TSP learning rate: 0.2 → 0.4
-- PyTorch implementation uses Euler integration for stateful settling (no ODE solver)
-
----
-
-## Statistical Learning Task
-
-Community graph structure (Schapiro 2017 Fig. 1):
-- Items organized into communities (e.g., 3 communities × 3 items = 9 items)
-- Within-community transitions are more frequent
-- Between-community transitions happen only at bottleneck nodes
-- After training: CA1 develops separate community-level representations
-- MSP learns the full transition probability matrix
-- TSP retains individual episode memories without blending
-
----
-
-## EfAb Extension: SR(t) over Conjunctive Subspace
-
-From EfAb_grant_v2.md (April 2026):
-
-**SR(t) key idea:** Extend the standard successor representation matrix M(s,s') to M(s,s',t) where t indexes within-trial timestep. EC represents the eigenspace of M(s,s',t). Conjunctive subspace = high-eigenvalue dimensions of M(s,s',t).
-
-**n_dynamic / n_stable framework:**
-- **n_dynamic**: the dynamic portion of the within-trial trajectory (cue → S → R) — variable across trials early in learning, stabilizes with practice
-- **n_stable**: the stable endpoint state (post-response conjunctive representation) — the target that n_dynamic converges to
-- SR(t) = the probability that n_dynamic reaches n_stable by time t within a trial
-
-**Behavioral signatures:**
-- Power-law improvement = n_dynamic/n_stable convergence speeding up with practice
-- Overnight abstraction = n_stable becomes cue-invariant (cue identity compressed to low eigenvectors)
-
----
-
-## Implementation Status
-
-| Step | Component | Status |
-|------|-----------|--------|
-| 1 | `F_nxx1`, `F_kWTA`, `F_fffb` (util.py) | not started |
-| 2 | `L_ECin`, `L_ECout` (layer.py) | not started |
-| 3 | `L_DG` — pattern separation (layer.py) | not started |
-| 4 | `L_CA3` — attractor dynamics (layer.py) | not started |
-| 5 | `L_CA1` — MSP + TSP convergence (layer.py) | not started |
-| 6 | `CommunityGraphEnv`, `CommunityGraphDataset` (tasks.py) | not started |
-| 7 | `M_HipSL` assembly + CHL training loop (model.py) | not started |
-| 8 | Reproduce Schapiro 2017 results | not started |
-| 9 | `M_HipSL_SR`: SR(t) extension (model.py) | not started |
-| 10 | EfAb behavioral readouts | not started |
+Key parameter differences from emergent original (Go reimplementation): KWTA → FFFB inhibition; MSP lr 0.02 → 0.05; TSP lr 0.2 → 0.4.
 
 ---
 
@@ -119,40 +88,71 @@ From EfAb_grant_v2.md (April 2026):
 ```
 EChipp_SL/
 ├── src/
-│   ├── util.py           F_nxx1, F_kWTA, F_fffb
+│   ├── util.py           F_nxx1, F_kWTA
 │   ├── layer.py          L_ECin, L_ECout, L_DG, L_CA3, L_CA1
-│   ├── model.py          M_HipSL, M_HipSL_SR
-│   └── tasks.py          CommunityGraphEnv, CommunityGraphDataset
+│   ├── model.py          M_HipSL
+│   └── tasks.py          CommunityGraphEnv, RuleActionEnv
 ├── notebook/
 │   ├── test_nxx1.ipynb           Step 1
 │   ├── test_layers.ipynb         Steps 2–5
 │   ├── test_task.ipynb           Step 6
-│   ├── test_full_model.ipynb     Steps 7–8
-│   └── test_sr.ipynb             Steps 9–10
-├── simulations/          (empty — not yet started)
-├── scripts/              (empty — not yet started)
+│   └── test_full_model.ipynb     Steps 7–10
+├── config/
+│   ├── ARCHITECTURE_ENG.md   Master document (equations, parameters, roadmap)
+│   └── requirements.txt
+├── manuscript/
 ├── trained_models/
 ├── visualizations/
-├── manuscript/
-├── config/
-│   ├── ARCHITECTURE.md   Master document (equations, parameters, roadmap)
-│   └── requirements.txt
 ├── CLAUDE.md
 └── README.md
 ```
 
 ---
 
+## Tasks
+
+**Community graph (Schapiro 2017):** 15 items in 5 communities; random walk; within-community transitions more frequent. CA1 develops community-level representations; MSP captures transition statistics; TSP retains episodic detail.
+
+**Rule-action selection (K&M task):** 4 rules × 4 stimuli = 16 conjunctive action contexts (Kikumoto et al. 2025). ECin carries rate-coded rule + stimulus features; CA1 must form context-specific conjunctive representations (RSRCONJ) via Hebbian CHL.
+
+---
+
+## Extension to neural subspaces of task representations
+
+Within-trial neural state(t) trajectory decomposition in CA1:
+
+- **n_stable**: temporally stable representation (post-response conjunction); increases with practice
+- **n_dynamic**: time-varying trajectory converging toward n_stable; decreases with practice
+
+Practice signature: n_stable emerges earlier in the trial. Overnight consolidation compresses cue identity into low-variance dimensions, producing cue-invariant RSRCONJ representations (Kikumoto et al. 2025).
+
+---
+
+## Implementation Status
+
+| Step | Component | Status |
+|------|-----------|--------|
+| 1 | `F_nxx1`, `F_kWTA` (util.py) | done |
+| 2 | `L_ECin`, `L_ECout` (layer.py) | done |
+| 3 | `L_DG` — pattern separation (layer.py) | not started |
+| 4 | `L_CA3` — attractor dynamics (layer.py) | not started |
+| 5 | `L_CA1` — MSP + TSP convergence (layer.py) | not started |
+| 6 | `CommunityGraphEnv`, `CommunityGraphDataset` (tasks.py) | not started |
+| 7 | `M_HipSL` assembly + CHL training loop (model.py) | not started |
+| 8 | Reproduce Schapiro 2017 results | not started |
+| 9 | `RuleActionEnv`, `RuleActionDataset` — K&M task (tasks.py) | not started |
+| 10 | Train M_HipSL on K&M task; CA1 RSA vs. RSRCONJ | not started |
+
+---
+
 ## Quick Start
 
 ```bash
-# Create virtual environment
-uv venv .venv
-source .venv/bin/activate
+# CLI scripts
+uv venv .venv && source .venv/bin/activate
 uv pip install torch numpy matplotlib seaborn pandas
 
-# Open notebooks step by step
-# notebook/test_nxx1.ipynb  ← start here (Step 1)
+# Notebooks: use conda env "NN" in VS Code
 ```
 
 ---
@@ -166,10 +166,3 @@ uv pip install torch numpy matplotlib seaborn pandas
 - **Garvert, M. M., Dolan, R. J., & Behrens, T. E. J. (2017).** A map of abstract relational knowledge in the human hippocampal–entorhinal cortex. *eLife*, 6, e17086.
 - **Kikumoto, A. et al. (2025).** Conjunctive representational trajectories predict power-law improvement and overnight abstraction. *Cerebral Cortex*.
 - **Mylonas, D. et al. (2024).** Hippocampus is necessary for micro-offline gains. *J. Neurosci.*
-
----
-
-## See Also
-
-- `config/ARCHITECTURE.md` — Full implementation specification with equations and paper citations
-- `EfAb_grant_v2.md` — Grant document motivating the SR(t) extension

@@ -1,0 +1,287 @@
+
+<style>
+.hc{font-size:13px;color:var(--color-text-primary);padding:8px 0}
+.cards{display:flex;flex-direction:column;gap:0}
+.card{display:grid;grid-template-columns:152px 1fr;border:0.5px solid var(--color-border-tertiary);border-radius:0;margin-bottom:-0.5px}
+.card:first-child{border-radius:8px 8px 0 0}
+.card:last-child{border-radius:0 0 8px 8px;margin-bottom:0}
+.lc{padding:10px 12px;display:flex;flex-direction:column;justify-content:center;border-right:0.5px solid var(--color-border-tertiary)}
+.lc .rg{font-weight:500;font-size:14px}
+.lc .pw{font-size:11px;margin-top:3px;color:var(--color-text-secondary)}
+.dc{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr}
+.cl{padding:8px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;line-height:1.55}
+.cl:last-child{border-right:none}
+.ch{font-weight:500;font-size:11px;color:var(--color-text-secondary);margin-bottom:3px}
+.fs{display:inline-block;padding:1px 6px;border-radius:4px;font-weight:500;font-size:11px;margin-top:3px}
+.fy{background:#E1F5EE;color:#085041}
+.fd{background:#FAEEDA;color:#633806}
+.fn{background:#FCEBEB;color:#791F1F}
+sup.ref{font-size:9px;color:var(--color-text-info);font-weight:500}
+.conf{color:var(--color-text-primary)}
+.est{color:var(--color-text-secondary);font-style:italic}
+.ec .lc{background:#E1F5EE} .ec .rg{color:#085041}
+.dg .lc{background:#EAF3DE} .dg .rg{color:#27500A}
+.ca3 .lc{background:#FAEEDA} .ca3 .rg{color:#633806}
+.ca1 .lc{background:#EEEDFE} .ca1 .rg{color:#26215C}
+.sub .lc{background:#F1EFE8} .sub .rg{color:#2C2C2A}
+.refs{margin-top:12px;font-size:11px;color:var(--color-text-secondary);line-height:1.7;border-top:0.5px solid var(--color-border-tertiary);padding-top:8px}
+.refs b{color:var(--color-text-primary)}
+.col-hdrs{display:grid;grid-template-columns:152px 1fr;margin-bottom:-0.5px}
+.col-hdrs-inner{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;border:0.5px solid var(--color-border-tertiary);border-radius:8px 8px 0 0;border-bottom:none;background:var(--color-background-secondary)}
+.col-hdr{padding:6px 10px;font-size:11px;font-weight:500;color:var(--color-text-secondary);border-right:0.5px solid var(--color-border-tertiary)}
+.col-hdr:last-child{border-right:none}
+.col-hdr-r{padding:6px 12px;font-size:11px;font-weight:500;color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:8px 0 0 0;border-right:0.5px solid var(--color-border-tertiary);border-bottom:none;background:var(--color-background-secondary)}
+</style>
+<div class="hc">
+
+<!-- circuit -->
+<svg width="100%" viewBox="0 0 680 205" role="img" style="margin-bottom:12px">
+  <title>Schapiro-model EC–hippocampal circuit: TSP and MSP pathways</title>
+  <defs>
+    <marker id="at" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <marker id="am" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#5F5E5A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <rect x="14" y="8" width="14" height="3" rx="1" fill="#1D9E75"/>
+  <text class="ts" x="34" y="13" style="font-size:11px;fill:#085041;font-weight:500">Trisynaptic pathway (TSP) — EC Layer II → DG → CA3 → CA1</text>
+  <line x1="14" y1="26" x2="28" y2="26" stroke="#534AB7" stroke-width="1.5" stroke-dasharray="4 2"/>
+  <text class="ts" x="34" y="30" style="font-size:11px;fill:#3C3489;font-weight:500">Monosynaptic pathway (MSP) — EC Layer III → CA1 direct  (15–20 ms faster)</text>
+  <g class="c-teal"><rect x="14" y="80" width="80" height="90" rx="8" stroke-width="0.5"/>
+    <text class="th" x="54" y="112" text-anchor="middle" dominant-baseline="central" style="font-size:12px">ECin</text>
+    <text class="ts" x="54" y="130" text-anchor="middle" style="font-size:10px">L.II → TSP</text>
+    <text class="ts" x="54" y="145" text-anchor="middle" style="font-size:10px">L.III → MSP</text>
+    <text class="ts" x="54" y="160" text-anchor="middle" style="font-size:10px">grid cells</text></g>
+  <g class="c-green"><rect x="152" y="50" width="84" height="60" rx="8" stroke-width="0.5"/>
+    <text class="th" x="194" y="72" text-anchor="middle" dominant-baseline="central" style="font-size:12px">DG</text>
+    <text class="ts" x="194" y="90" text-anchor="middle" style="font-size:10px">pattern sep.</text>
+    <text class="ts" x="194" y="104" text-anchor="middle" style="font-size:10px">sparse codes</text></g>
+  <g class="c-amber"><rect x="298" y="50" width="84" height="60" rx="8" stroke-width="0.5"/>
+    <text class="th" x="340" y="72" text-anchor="middle" dominant-baseline="central" style="font-size:12px">CA3</text>
+    <text class="ts" x="340" y="90" text-anchor="middle" style="font-size:10px">pattern comp.</text>
+    <text class="ts" x="340" y="104" text-anchor="middle" style="font-size:10px">recurrent net</text></g>
+  <g class="c-purple"><rect x="444" y="80" width="84" height="90" rx="8" stroke-width="0.5"/>
+    <text class="th" x="486" y="112" text-anchor="middle" dominant-baseline="central" style="font-size:12px">CA1</text>
+    <text class="ts" x="486" y="130" text-anchor="middle" style="font-size:10px">TSP + MSP</text>
+    <text class="ts" x="486" y="145" text-anchor="middle" style="font-size:10px">converge</text>
+    <text class="ts" x="486" y="160" text-anchor="middle" style="font-size:10px">temporal integ.</text></g>
+  <g class="c-gray"><rect x="592" y="80" width="74" height="90" rx="8" stroke-width="0.5"/>
+    <text class="th" x="629" y="112" text-anchor="middle" dominant-baseline="central" style="font-size:12px">ECout</text>
+    <text class="ts" x="629" y="130" text-anchor="middle" style="font-size:10px">L.V / VI</text>
+    <text class="ts" x="629" y="145" text-anchor="middle" style="font-size:10px">→ neocortex</text></g>
+  <path d="M94 105 Q122 105 122 80 L152 80" fill="none" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#at)"/>
+  <text class="ts" x="123" y="72" text-anchor="middle" style="font-size:10px;fill:#085041">perforant path</text>
+  <line x1="236" y1="80" x2="298" y2="80" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#at)"/>
+  <text class="ts" x="266" y="72" text-anchor="middle" style="font-size:10px;fill:#085041">mossy fiber</text>
+  <path d="M382 80 Q412 80 412 110 L444 110" fill="none" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#at)"/>
+  <text class="ts" x="415" y="72" text-anchor="middle" style="font-size:10px;fill:#085041">Schaffer coll.</text>
+  <path d="M94 118 Q196 148 298 98" fill="none" stroke="#1D9E75" stroke-width="1.2" marker-end="url(#at)"/>
+  <text class="ts" x="196" y="163" text-anchor="middle" style="font-size:10px;fill:#085041">direct (25%)</text>
+  <path d="M94 148 Q268 200 444 148" fill="none" stroke="#534AB7" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#am)"/>
+  <text class="ts" x="268" y="199" text-anchor="middle" style="font-size:10px;fill:#3C3489">temporoammonic path</text>
+  <line x1="528" y1="125" x2="592" y2="125" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#ao)"/>
+  <text class="ts" x="560" y="116" text-anchor="middle" style="font-size:10px;fill:#5F5E5A">Sub → ECout</text>
+  <text class="ts" x="666" y="205" text-anchor="end" style="font-size:10px;fill:#888">Schapiro et al. 2017 [3]</text>
+</svg>
+
+<div class="col-hdrs">
+  <div class="col-hdr-r">Region</div>
+  <div class="col-hdrs-inner">
+    <div class="col-hdr">Depth &amp; size</div>
+    <div class="col-hdr">Computational role</div>
+    <div class="col-hdr">Schapiro model</div>
+    <div class="col-hdr">Existing TUS studies</div>
+    <div class="col-hdr">TUS feasibility</div>
+  </div>
+</div>
+
+<div class="cards">
+
+<div class="card ec">
+  <div class="lc"><div class="rg">Entorhinal cortex</div><div class="pw">TSP + MSP gateway</div></div>
+  <div class="dc">
+    <div class="cl"><div class="ch">Depth / size</div>
+      <span class="est">depth: ~60–70 mm †</span><br>
+      <span class="conf">ML width: &lt;~10 mm <sup class="ref">[1]</sup></span><br>
+      <span class="est">AP extent: ~20 mm †</span><br>
+      <span class="est">cortical thick: ~3 mm †</span><br>
+      <span class="est">vol: ~600–900 mm³ †</span>
+    </div>
+    <div class="cl"><div class="ch">Computational role</div>
+      Grid cells (MEC) <sup class="ref">[2]</sup><br>
+      Layer II → DG/CA3 (TSP)<br>
+      Layer III → CA1 (MSP)<br>
+      <em>Sole cortical gateway</em>
+    </div>
+    <div class="cl"><div class="ch">Schapiro model</div>
+      15 units (n_items) <sup class="ref">[3]</sup><br>
+      k=2 absolute; 2 active/trial<br>
+      moving window: curr=1.0, prev=0.9 <sup class="ref">[3]</sup><br>
+      L.II → TSP; L.III → MSP<br>
+      <em>no learned weights</em>
+    </div>
+    <div class="cl"><div class="ch">Existing TUS studies</div>
+      Kuhn et al. 2023 <sup class="ref">[4]</sup><br>
+      (perfusion ↑, rsFC mod.)<br>
+      Hoang-Dang et al. 2024 <sup class="ref">[5]</sup><br>
+      (crossover w/ amygdala)
+    </div>
+    <div class="cl"><div class="ch">Feasibility</div>
+      <span class="fs fy">✓ feasible</span><br>
+      depth in DPX-500 range<br>
+      human TUS evidence<br>
+      large enough for focal spot
+    </div>
+  </div>
+</div>
+
+<div class="card dg">
+  <div class="lc"><div class="rg">Dentate gyrus</div><div class="pw">TSP only  (synapse 1)</div></div>
+  <div class="dc">
+    <div class="cl"><div class="ch">Depth / size</div>
+      <span class="est">depth: ~68–75 mm †</span><br>
+      <span class="conf">vol: ~110 mm³ <sup class="ref">[6]</sup></span><br>
+      <span class="conf">cross-section width: see hippocampus body ~7–8 mm total <sup class="ref">[7]</sup></span><br>
+      <em>thin curved ribbon; no subfield width confirmed separately</em>
+    </div>
+    <div class="cl"><div class="ch">Computational role</div>
+      Pattern separation <sup class="ref">[3]</sup><br>
+      Sparse orthogonal codes<br>
+      Adult neurogenesis<br>
+      <em>TSP entry — ideal target</em>
+    </div>
+    <div class="cl"><div class="ch">Schapiro model</div>
+      ~1% sparsity (k_frac=0.01) <sup class="ref">[3]</sup><br>
+      ECin→DG: 25% connectivity <sup class="ref">[3]</sup><br>
+      DG→CA3: 5% mossy fiber <sup class="ref">[3]</sup><br>
+      TSP lr=0.4<br>
+      <em>no recurrent connections</em>
+    </div>
+    <div class="cl"><div class="ch">Existing TUS studies</div>
+      None (human)<br>
+      Too small for selective<br>
+      in-vivo targeting
+    </div>
+    <div class="cl"><div class="ch">Feasibility</div>
+      <span class="fs fn">✗ not feasible</span><br>
+      Volume ~110 mm³ <sup class="ref">[6]</sup><br>
+      Much smaller than focal<br>
+      spot ~6.2 mm (DPX-500) <sup class="ref">[8]</sup>
+    </div>
+  </div>
+</div>
+
+<div class="card ca3">
+  <div class="lc"><div class="rg">CA3</div><div class="pw">TSP only  (synapse 2)</div></div>
+  <div class="dc">
+    <div class="cl"><div class="ch">Depth / size</div>
+      <span class="est">depth: ~68–75 mm †</span><br>
+      <span class="conf">vol: ~56 mm³ <sup class="ref">[6]</sup></span><br>
+      <span class="conf">ASHS DSC &lt;0.54: too small to reliably segment at 7T <sup class="ref">[9]</sup></span><br>
+      <em>smallest subfield</em>
+    </div>
+    <div class="cl"><div class="ch">Computational role</div>
+      Pattern completion <sup class="ref">[3]</sup><br>
+      Recurrent attractor net<br>
+      Heteroassoc. encoding<br>
+      <em>One-shot binding</em>
+    </div>
+    <div class="cl"><div class="ch">Schapiro model</div>
+      ~10% sparsity (k_frac=0.10) <sup class="ref">[3]</sup><br>
+      mossy fiber: 5% from DG<br>
+      CA3→CA3 recurrent (Hopfield)<br>
+      TSP lr=0.4<br>
+      <em>one-shot heteroassoc. binding</em>
+    </div>
+    <div class="cl"><div class="ch">Existing TUS studies</div>
+      None (human)<br>
+      Cannot isolate from<br>
+      CA1/DG acoustically
+    </div>
+    <div class="cl"><div class="ch">Feasibility</div>
+      <span class="fs fn">✗ not feasible</span><br>
+      Volume ~56 mm³ <sup class="ref">[6]</sup><br>
+      Smallest subfield;<br>
+      no spatial selectivity
+    </div>
+  </div>
+</div>
+
+<div class="card ca1">
+  <div class="lc"><div class="rg">CA1</div><div class="pw">TSP + MSP converge</div></div>
+  <div class="dc">
+    <div class="cl"><div class="ch">Depth / size</div>
+      <span class="est">depth: ~65–72 mm †</span><br>
+      <span class="conf">vol: ~547 mm³ <sup class="ref">[6]</sup></span><br>
+      <span class="conf">hippocampus body: H≈7.3 mm, W≈8.3 mm (total) <sup class="ref">[7]</sup></span><br>
+      <em>largest subfield (~50% of hippocampus)</em>
+    </div>
+    <div class="cl"><div class="ch">Computational role</div>
+      Temporal integration<br>
+      Episodic context binding <sup class="ref">[3]</sup><br>
+      Receives TSP + MSP<br>
+      <em>No pathway selectivity</em>
+    </div>
+    <div class="cl"><div class="ch">Schapiro model</div>
+      ~10% sparsity<br>
+      MSP: ECin→CA1 lr=0.05 (slow) <sup class="ref">[3]</sup><br>
+      TSP: CA3→CA1 lr=0.4 (fast) <sup class="ref">[3]</sup><br>
+      Q1: ECin dom. / Q2–Q3: CA3 dom.<br>
+      Q4: ECout clamped → correction
+    </div>
+    <div class="cl"><div class="ch">Existing TUS studies</div>
+      No CA1-specific studies<br>
+      Hippocampus whole:<br>
+      Suthana et al. 2022 (DBS)<br>
+      TUS: indirect only
+    </div>
+    <div class="cl"><div class="ch">Feasibility</div>
+      <span class="fs fd">△ marginal</span><br>
+      largest → most hittable<br>
+      but TSP + MSP both hit<br>
+      → no TSP dissociation
+    </div>
+  </div>
+</div>
+
+<div class="card sub">
+  <div class="lc"><div class="rg">Subiculum</div><div class="pw">Output hub</div></div>
+  <div class="dc">
+    <div class="cl"><div class="ch">Depth / size</div>
+      <span class="est">depth: ~65–72 mm †</span><br>
+      <span class="conf">vol: ~289 mm³ <sup class="ref">[6]</sup></span>
+    </div>
+    <div class="cl"><div class="ch">Computational role</div>
+      CA1 output relay<br>
+      → EC, PFC, thalamus, NAcc<br>
+      <em>Hippocampal efference</em>
+    </div>
+    <div class="cl"><div class="ch">Schapiro model</div>
+      Not in Schapiro model<br>
+      CA1→Sub→EC output relay<br>
+      <em>not a modeled node</em>
+    </div>
+    <div class="cl"><div class="ch">Existing TUS studies</div>None</div>
+    <div class="cl"><div class="ch">Feasibility</div>
+      <span class="fs fn">✗ not targeted</span><br>
+      Not a Schapiro-model<br>
+      relevant node
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="refs">
+<b>Confirmed from literature (this session)</b><br>
+[1] Maass et al. 2015, eLife — EC ML width &lt;~10 mm (7T fMRI)<br>
+[2] Hafting et al. 2005, Nature — grid cells in MEC<br>
+[3] Schapiro et al. 2017, Phil Trans R Soc B — TSP = episodic binding; MSP = regularities<br>
+[4] Kuhn et al. 2023, Front. Neural Circuits — EC TUS: perfusion ↑, rsFC modulation<br>
+[5] Hoang-Dang et al. 2024, PMC11293512 — EC as active control vs. amygdala TUS<br>
+[6] BigBrain, Nat. Comput. Sci. 2023 — subfield volumes (one hemisphere)<br>
+[7] Wisse et al. 2017, Cereb. Cortex — hippocampus body height 7.26 ± 0.74 mm, width 8.34 ± 0.69 mm (in vivo T1, whole cross-section)<br>
+[8] Focal spot: 0.886 × (f/D) × λ = 0.886 × (150/64) × 3 mm ≈ 6.2 mm (DPX-500, 500 kHz, water)<br>
+[9] Wisse et al. 2016, AJNR — ASHS 7T: DSC &lt;0.54 for CA2/CA3 (too small to reliably segment)<br>
+<span style="color:var(--color-text-secondary)">† = not directly confirmed in literature this session. Individual subfield x,y,z dimensions (separate from total volume) are not routinely reported in published papers; Duvernoy (2005) atlas is the standard primary reference but was not accessible for fetch this session.</span>
+</div>
+</div>

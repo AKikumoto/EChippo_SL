@@ -28,6 +28,25 @@ Three-phase trial structure — 100 cycles (Schapiro 2017 §2.b–c):
   Q2–Q3    (cycles 26–75): CA3 → CA1 strong; ECin → CA1 reduced.  Theta peak (retrieval).
   Q4/plus  (cycles 76–100): ECout clamped to target. Weight update uses ActM (Q3) and ActP.
 
+CHL — Contrastive Hebbian Learning (O'Reilly & Munakata 2000, Ch. 4; Schapiro 2017 §2.b):
+
+  ΔW = lr × (ActP ⊗ ActP  −  ActM ⊗ ActM)
+
+  ActM = activity at end of Q3 (cycle 75)   — minus phase (free prediction)
+  ActP = activity at end of Q4 (cycle 100)  — plus phase  (ECout clamped to target)
+  ⊗    = outer product of post × pre activity vectors
+
+  Per-pathway learning rates (Go reimplementation; Schapiro 2017 §2.b):
+    MSP  ECin → CA1                       lr = 0.05  slow; accumulates statistics
+    TSP  ECin → DG, DG → CA3,            lr = 0.4   fast; binds individual episodes
+         CA3 → CA3 (rec), CA3 → CA1
+    out  CA1 → ECout                      lr = 0.05  matches MSP
+
+  Why two rates? MSP needs many trials to learn community structure (slow smoothing).
+  TSP needs one shot to bind an episode before the next trial overwrites it (fast Hebb).
+  Schapiro (2017) §2.b: "The learning rate in the TSP is set to be 10× higher than in
+  the MSP."
+
 Naming conventions:
   L_* : layer modules in layer.py
   M_* : full model classes in model.py
@@ -304,7 +323,23 @@ class L_DG(nn.Module):
         -------
         activity : FloatTensor, shape (n_DG,)
         """
-        raise NotImplementedError("Step 3: implement L_DG.forward()")
+        # Net input: masked sparse ECin → DG projection
+        # W * mask zeros non-connected weights; Schapiro (2017) §2.a.iii: 25% sparse
+        net = a_ECin @ (self.W * self.mask)   # (n_DG,)
+
+        # NoisyXX1 activation; O'Reilly & Munakata (2000) Ch. 2 Eq. 2.12
+        vm = F_nxx1(net)
+
+        # kWTA: ~1% active; enforces orthogonal DG codes; Schapiro (2017) §2.2
+        new_act = F_kWTA(vm, k_frac=self.k_frac)
+
+        if self.use_euler:
+            # Euler: a(t) = (1−tau)*a(t−1) + tau*new_act; Leabra default tau=0.1
+            self._activity = (1.0 - self.tau) * self._activity + self.tau * new_act
+        else:
+            self._activity = new_act
+
+        return self._activity
 
     def update_weights(
         self, a_ECin_minus: torch.Tensor, a_ECin_plus: torch.Tensor,
@@ -317,7 +352,12 @@ class L_DG(nn.Module):
         Masked: only update connected weights (mask == 1).
         O'Reilly & Munakata (2000) Ch. 4 Eq. 4.3; Schapiro (2017) §2.b.
         """
-        raise NotImplementedError("Step 3: implement L_DG.update_weights()")
+        # W is (n_input, n_DG): outer(a_ECin, a_DG) has the same shape
+        delta_plus  = torch.outer(a_ECin_plus,  a_DG_plus)
+        delta_minus = torch.outer(a_ECin_minus, a_DG_minus)
+        # Apply mask: non-connected weights stay at zero
+        # Schapiro (2017) §2.a.v: connectivity pattern is fixed per network init
+        self.W.data += lr * self.mask * (delta_plus - delta_minus)
 
 
 # =========================================================================
@@ -467,7 +507,27 @@ class L_CA3(nn.Module):
         a_CA3(t) = (1 − tau) * a_CA3(t−1) + tau * kWTA(nxx1(net))
         O'Reilly & Munakata (2000) Ch. 2.
         """
-        raise NotImplementedError("Step 4: implement L_CA3.forward()")
+        # Mossy fibre: DG → CA3 (5% sparse); Schapiro (2017) §2.a.iii
+        net = a_DG @ (self.W_ff * self.mask_ff)   # (n_CA3,)
+
+        # Recurrent: CA3 → CA3 (fully connected; pattern completion attractor)
+        # Schapiro (2017) §2.a.iii: "fully connected projection to itself"
+        # O'Reilly & Munakata (2000) Ch. 2: net(t) includes W_rec @ a(t-1)
+        net = net + self._activity @ self.W_rec   # (n_CA3,)
+
+        # NoisyXX1 activation; O'Reilly & Munakata (2000) Ch. 2 Eq. 2.12
+        vm = F_nxx1(net)
+
+        # kWTA: ~10% active; Schapiro (2017) §2.a.iii
+        new_act = F_kWTA(vm, k_frac=self.k_frac)
+
+        if self.use_euler:
+            # Euler: a(t) = (1−tau)*a(t−1) + tau*new_act; Leabra default tau=0.1
+            self._activity = (1.0 - self.tau) * self._activity + self.tau * new_act
+        else:
+            self._activity = new_act
+
+        return self._activity
 
     def update_weights(
         self,
@@ -482,7 +542,17 @@ class L_CA3(nn.Module):
         Masked: only update existing mossy fibre connections (mask_ff == 1).
         O'Reilly & Munakata (2000) Ch. 4 Eq. 4.3; Schapiro (2017) §2.b.
         """
-        raise NotImplementedError("Step 4: implement L_CA3.update_weights()")
+        # Feedforward (mossy fibre): W_ff is (n_DG, n_CA3)
+        delta_ff = (torch.outer(a_DG_plus,  a_CA3_plus)
+                  - torch.outer(a_DG_minus, a_CA3_minus))
+        self.W_ff.data += lr * self.mask_ff * delta_ff
+
+        # Recurrent (Hopfield auto-association): W_rec is (n_CA3, n_CA3)
+        # pre = post = CA3 activity → symmetric weight update
+        # Schapiro (2017) §2.a.iii: "helps bind pieces of a representation"
+        delta_rec = (torch.outer(a_CA3_plus,  a_CA3_plus)
+                   - torch.outer(a_CA3_minus, a_CA3_minus))
+        self.W_rec.data += lr * delta_rec
 
 
 # =========================================================================

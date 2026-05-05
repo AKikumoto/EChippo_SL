@@ -4,8 +4,6 @@ PyTorch reimplementation of Schapiro et al. (2017) hippocampal statistical learn
 
 ---
 
-## Target Model: Schapiro et al. (2017)
-
 Schapiro, A. C., Turk-Browne, N. B., Botvinick, M. M., & Norman, K. A. (2017). Complementary learning systems within the hippocampus: a neural network modelling approach to reconciling episodic memory with statistical learning. *Philosophical Transactions of the Royal Society B*, 372, 20160049. ([original Go code](https://github.com/schapirolab/hip-sl))
 
 Hippocampus contains two complementary pathways that serve different learning functions:
@@ -71,15 +69,29 @@ ECin ─────────────────────────
 
 </div>
 
-### CHL Learning (Contrastive Hebbian Learning)
+---
 
-Two phases per trial:
-- **Minus phase:** ECin active, CA1 driven by prediction (no ECout teaching signal)
-- **Plus phase:** ECin + ECout both active; CA1 driven toward correct output
+## Learning Rule
 
-Weight update: `ΔW ∝ y_plus - y_minus` (Schapiro 2017; O'Reilly & Munakata 2000)
+**CHL — Contrastive Hebbian Learning** (O'Reilly & Munakata 2000, Ch. 4; Schapiro 2017 §2.b)
 
-Key parameter differences from emergent original (Go reimplementation): KWTA → FFFB inhibition; MSP lr 0.02 → 0.05; TSP lr 0.2 → 0.4.
+Each trial has two phases. The weight update is the difference between them:
+
+```
+ΔW = lr × (ActP ⊗ ActP  −  ActM ⊗ ActM)
+
+ActM  end of Q3 (cycle 75)   — minus phase: network's free prediction
+ActP  end of Q4 (cycle 100)  — plus phase:  ECout clamped to correct next item
+⊗     outer product (post × pre)
+```
+
+| Pathway | Weights updated | lr |
+|---------|----------------|-----|
+| MSP | ECin → CA1 | 0.05 |
+| TSP | ECin → DG, DG → CA3, CA3 → CA3, CA3 → CA1 | 0.4 |
+| Output | CA1 → ECout | 0.05 |
+
+MSP is slow (many trials → statistical regularities). TSP is 10× faster (one-shot episode binding). Parameter values from the Go reimplementation; original emergent: MSP 0.02, TSP 0.2.
 
 ---
 

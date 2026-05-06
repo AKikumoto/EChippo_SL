@@ -1,13 +1,36 @@
 """
 layer.py: neural layers for the EC-hippocampus statistical learning circuit.
 
-| Layer   | Description               | Role                                               |
-|---------|---------------------------|----------------------------------------------------|
-| L_ECin  | Entorhinal cortex input   | Float activity vector; Euler; big loop ready       |
-| L_DG    | Dentate gyrus             | Pattern separation; sparse kWTA (~1%)         |
-| L_CA3   | CA3 field                 | Pattern completion; recurrent attractor       |
-| L_CA1   | CA1 field                 | MSP + TSP convergence; output readout         |
-| L_ECout | Entorhinal cortex output  | Reconstruction target; plus-phase teacher     |
+Connection diagram (Schapiro et al. 2017 §2.a):
+
+  Input
+    │
+  L_ECin ──────────────────────────────────────────── W_ECin ──► L_CA1 ──► L_ECout
+    │   (MSP: direct, lr=0.05; learns statistics)               ▲   ▲        │
+    │                                                            │   │        │
+    │   (TSP: lr=0.4; learns episodes)                          │   │ W_ECout│
+    ├──25%──► L_DG ──5% mossy──► L_CA3 ──── W_CA3 ────────────►│   │◄───────┘
+    │          (~1%)               (~10%)                        │   │  back-proj (Q4 only)
+    └──25%──────────────────────────────────────────────────────►│   │
+               (ECin→CA3 direct; Schapiro 2017 §2.a.iii)        │   │
+                                    ↺ W_rec (fully connected)    │   │
+                                                                 │   │
+  W shapes:                                                      │   │
+    W_ECin_DG  (n_ECin, n_DG)     mask: 25% sparse (ecin_frac)  │   │
+    W_DG_CA3   (n_DG,  n_CA3)     mask:  5% sparse (dg_frac)    │   │
+    W_CA3_CA3  (n_CA3, n_CA3)     full (recurrent attractor)     │   │
+    W_ECin_CA1 (n_ECin, n_CA1)    full (MSP)                     │   │
+    W_CA3_CA1  (n_CA3, n_CA1)     full (TSP)                     │   │
+    W_ECout_CA1(n_ECin, n_CA1)    full (back-projection, Q4)     │   │
+    W_CA1_ECout(n_CA1, n_ECin)    full (output)                  │   │
+
+| Layer   | Description               | Role                                   |
+|---------|---------------------------|----------------------------------------|
+| L_ECin  | Entorhinal cortex input   | Float activity clamp; big-loop ready   |
+| L_DG    | Dentate gyrus             | Pattern separation; ~1% kWTA           |
+| L_CA3   | CA3 field                 | Pattern completion; recurrent W_rec    |
+| L_CA1   | CA1 field                 | MSP + TSP convergence                  |
+| L_ECout | Entorhinal cortex output  | Reconstruction; plus-phase teacher     |
 
 Circuit from Schapiro et al. (2017) Phil. Trans. R. Soc. B, 372, 20160049.
 See config/ARCHITECTURE_ENG.md for full equations, parameters, and CHL settling policy.
@@ -297,23 +320,27 @@ class L_DG(nn.Module):
             (torch.rand(n_input, n_DG) < ecin_frac).float()
         )
 
-        # Euler activity buffer — zero at trial onset
-        self.register_buffer('_activity', torch.zeros(n_DG))
+        # Separate Euler state (membrane potential) and firing rate (output)
+        # In emergent/Leabra, Vm is integrated by Euler; y = F(Vm) is the output.
+        # Feeding y (not Vm) into recurrent input is the correct Leabra formulation.
+        self.register_buffer('_Vm', torch.zeros(n_DG))   # membrane potential (Euler state)
+        self.register_buffer('_y',  torch.zeros(n_DG))   # firing rate (kWTA output)
 
     @property
     def activity(self) -> torch.Tensor:
-        return self._activity
+        return self._y
 
     def reset(self) -> None:
-        """Reset activity to zero before each trial (before Q1 minus phase).
+        """Reset Vm and y to zero before each trial (before Q1 minus phase).
 
         Schapiro (2017) §2.b: layers re-initialize at trial onset.
         Plus phase (Q4) starts from Q2-Q3 final state — never reset mid-trial.
         """
-        self._activity.zero_()
+        self._Vm.zero_()
+        self._y.zero_()
 
     def forward(self, a_ECin: torch.Tensor) -> torch.Tensor:
-        """One settling step: ECin → net input → nxx1 → kWTA → Euler update.
+        """One settling step: ECin → net input → Euler on Vm → nxx1 → kWTA → y.
 
         Parameters
         ----------
@@ -321,25 +348,23 @@ class L_DG(nn.Module):
 
         Returns
         -------
-        activity : FloatTensor, shape (n_DG,)
+        y : FloatTensor, shape (n_DG,)
         """
         # Net input: masked sparse ECin → DG projection
         # W * mask zeros non-connected weights; Schapiro (2017) §2.a.iii: 25% sparse
         net = a_ECin @ (self.W * self.mask)   # (n_DG,)
 
-        # NoisyXX1 activation; O'Reilly & Munakata (2000) Ch. 2 Eq. 2.12
-        vm = F_nxx1(net)
-
-        # kWTA: ~1% active; enforces orthogonal DG codes; Schapiro (2017) §2.2
-        new_act = F_kWTA(vm, k_frac=self.k_frac)
-
+        # Euler integration on membrane potential Vm; O'Reilly & Munakata (2000) Ch. 2
+        # Vm(t) = (1−tau)*Vm(t−1) + tau*net(t); tau=0.1 Leabra default
         if self.use_euler:
-            # Euler: a(t) = (1−tau)*a(t−1) + tau*new_act; Leabra default tau=0.1
-            self._activity = (1.0 - self.tau) * self._activity + self.tau * new_act
+            self._Vm = (1.0 - self.tau) * self._Vm + self.tau * net
         else:
-            self._activity = new_act
+            self._Vm = net
 
-        return self._activity
+        # Firing rate: nxx1 then kWTA (~1% active)
+        # Schapiro (2017) §2.2; O'Reilly & Munakata (2000) Ch. 2 Eq. 2.12
+        self._y = F_kWTA(F_nxx1(self._Vm), k_frac=self.k_frac)
+        return self._y
 
     def update_weights(
         self, a_ECin_minus: torch.Tensor, a_ECin_plus: torch.Tensor,
@@ -410,10 +435,12 @@ class L_DG(nn.Module):
 #   CA3 → CA3  (W_rec; recurrent; fully connected; enables pattern completion)
 #   CA3 → CA1  (W_CA3 in L_CA1; feedforward; fully connected; TSP)
 #
-# [Stateful — Euler integration]:
-#   _activity carries the CA3 state across settling cycles.
-#   Recurrent dynamics: net_CA3(t) = W_ff @ a_DG + W_rec @ a_CA3(t−1)
-#                       a_CA3(t)   = (1−tau) * a_CA3(t−1) + tau * F_nxx1(net_CA3(t))
+# [Stateful — Euler integration, Vm/y separation]:
+#   Two buffers: _Vm (membrane potential, Euler state) and _y (firing rate, output).
+#   Recurrent input uses _y (firing rate), not _Vm (membrane potential).
+#   net_CA3(t)  = W_ff @ a_DG + W_rec @ y_CA3(t−1)   ← y, not Vm
+#   Vm_CA3(t)   = (1−tau) * Vm_CA3(t−1) + tau * net_CA3(t)
+#   y_CA3(t)    = kWTA(F_nxx1(Vm_CA3(t)))
 #   O'Reilly & Munakata (2000) Ch. 2.
 #   reset() before each trial's Q1 minus phase.
 #
@@ -490,44 +517,46 @@ class L_CA3(nn.Module):
         # requires_grad=False: updated manually via CHL.
         self.W_rec = nn.Parameter(torch.zeros(n_CA3, n_CA3), requires_grad=False)
 
-        self.register_buffer('_activity', torch.zeros(n_CA3))
+        # Separate Euler state (membrane potential) and firing rate.
+        # Recurrent input is y (firing rate), not Vm (membrane potential).
+        self.register_buffer('_Vm', torch.zeros(n_CA3))   # membrane potential (Euler state)
+        self.register_buffer('_y',  torch.zeros(n_CA3))   # firing rate (kWTA output)
 
     @property
     def activity(self) -> torch.Tensor:
-        return self._activity
+        return self._y
 
     def reset(self) -> None:
-        """Reset activity to zero before each trial (before Q1 minus phase)."""
-        self._activity.zero_()
+        """Reset Vm and y to zero before each trial (before Q1 minus phase)."""
+        self._Vm.zero_()
+        self._y.zero_()
 
     def forward(self, a_DG: torch.Tensor) -> torch.Tensor:
-        """One settling step: DG + CA3_prev → net input → nxx1 → kWTA → Euler update.
+        """One settling step: DG + y_CA3_prev → net → Euler on Vm → nxx1 → kWTA → y.
 
-        net = W_ff * mask_ff @ a_DG + W_rec @ a_CA3_prev
-        a_CA3(t) = (1 − tau) * a_CA3(t−1) + tau * kWTA(nxx1(net))
+        net_CA3(t)  = W_ff @ a_DG + W_rec @ y_CA3(t−1)   [y, not Vm]
+        Vm_CA3(t)   = (1−tau) * Vm_CA3(t−1) + tau * net_CA3(t)
+        y_CA3(t)    = kWTA(nxx1(Vm_CA3(t)))
         O'Reilly & Munakata (2000) Ch. 2.
         """
         # Mossy fibre: DG → CA3 (5% sparse); Schapiro (2017) §2.a.iii
         net = a_DG @ (self.W_ff * self.mask_ff)   # (n_CA3,)
 
         # Recurrent: CA3 → CA3 (fully connected; pattern completion attractor)
+        # Uses _y (firing rate), not _Vm (membrane potential).
         # Schapiro (2017) §2.a.iii: "fully connected projection to itself"
-        # O'Reilly & Munakata (2000) Ch. 2: net(t) includes W_rec @ a(t-1)
-        net = net + self._activity @ self.W_rec   # (n_CA3,)
+        # O'Reilly & Munakata (2000) Ch. 2: recurrent input = W_rec @ y(t-1)
+        net = net + self._y @ self.W_rec   # (n_CA3,)
 
-        # NoisyXX1 activation; O'Reilly & Munakata (2000) Ch. 2 Eq. 2.12
-        vm = F_nxx1(net)
-
-        # kWTA: ~10% active; Schapiro (2017) §2.a.iii
-        new_act = F_kWTA(vm, k_frac=self.k_frac)
-
+        # Euler integration on membrane potential; O'Reilly & Munakata (2000) Ch. 2
         if self.use_euler:
-            # Euler: a(t) = (1−tau)*a(t−1) + tau*new_act; Leabra default tau=0.1
-            self._activity = (1.0 - self.tau) * self._activity + self.tau * new_act
+            self._Vm = (1.0 - self.tau) * self._Vm + self.tau * net
         else:
-            self._activity = new_act
+            self._Vm = net
 
-        return self._activity
+        # Firing rate: nxx1 then kWTA (~10% active); Schapiro (2017) §2.a.iii
+        self._y = F_kWTA(F_nxx1(self._Vm), k_frac=self.k_frac)
+        return self._y
 
     def update_weights(
         self,
@@ -695,15 +724,17 @@ class L_CA1(nn.Module):
         # Completes the "big loop": ECin → CA1 → ECout → CA1
         self.W_ECout = nn.Parameter(torch.zeros(n_items, n_CA1), requires_grad=False)
 
-        self.register_buffer('_activity', torch.zeros(n_CA1))
+        self.register_buffer('_Vm', torch.zeros(n_CA1))   # membrane potential (Euler state)
+        self.register_buffer('_y',  torch.zeros(n_CA1))   # firing rate (kWTA output)
 
     @property
     def activity(self) -> torch.Tensor:
-        return self._activity
+        return self._y
 
     def reset(self) -> None:
-        """Reset activity to zero before each trial (before Q1 minus phase)."""
-        self._activity.zero_()
+        """Reset Vm and y to zero before each trial (before Q1 minus phase)."""
+        self._Vm.zero_()
+        self._y.zero_()
 
     def forward(
         self,
@@ -717,10 +748,28 @@ class L_CA1(nn.Module):
         Q2-Q3 (CA3-dominant minus): pass a_ECin=zeros (ECin→CA1 reduced).
         Q4   (plus phase):          pass all three inputs including a_ECout.
 
-        net = W_ECin @ a_ECin + W_CA3 @ a_CA3 [+ W_ECout @ a_ECout if plus]
-        a_CA1(t) = (1−tau) * a_CA1(t−1) + tau * kWTA(nxx1(net))
+        net      = W_ECin @ a_ECin + W_CA3 @ a_CA3 [+ W_ECout @ a_ECout if plus]
+        Vm(t)    = (1−tau) * Vm(t−1) + tau * net(t)
+        y_CA1(t) = kWTA(nxx1(Vm(t)))
+        Schapiro (2017) §2.a.iv; O'Reilly & Munakata (2000) Ch. 2.
         """
-        raise NotImplementedError("Step 5: implement L_CA1.forward()")
+        # MSP: ECin → CA1; TSP: CA3 → CA1; Schapiro (2017) §2.a.iv
+        net = a_ECin @ self.W_ECin + a_CA3 @ self.W_CA3   # (n_CA1,)
+
+        # Plus-phase back-projection: ECout → CA1 (teaching signal)
+        # Schapiro (2017) §2.a.iv: "big loop" — ECout → CA1 fully connected
+        if a_ECout is not None:
+            net = net + a_ECout @ self.W_ECout             # (n_CA1,)
+
+        # Euler on membrane potential; O'Reilly & Munakata (2000) Ch. 2
+        if self.use_euler:
+            self._Vm = (1.0 - self.tau) * self._Vm + self.tau * net
+        else:
+            self._Vm = net
+
+        # Firing rate: nxx1 then kWTA (~10% active); Schapiro (2017) §2.a.iv
+        self._y = F_kWTA(F_nxx1(self._Vm), k_frac=self.k_frac)
+        return self._y
 
     def update_weights(
         self,
@@ -738,7 +787,20 @@ class L_CA1(nn.Module):
         lr_MSP = 0.05 (Go reimplementation); lr_TSP = 0.4.
         O'Reilly & Munakata (2000) Ch. 4 Eq. 4.3; Schapiro (2017) §2.b.
         """
-        raise NotImplementedError("Step 5: implement L_CA1.update_weights()")
+        # W shapes: W_ECin (n_items, n_CA1), W_CA3 (n_CA3, n_CA1), W_ECout (n_items, n_CA1)
+        # MSP: ECin → CA1; slow learning rate accumulates community statistics
+        self.W_ECin.data += lr_MSP * (
+            torch.outer(a_ECin_plus,  a_CA1_plus)
+          - torch.outer(a_ECin_minus, a_CA1_minus)
+        )
+        # TSP: CA3 → CA1; fast learning rate binds individual episodes
+        self.W_CA3.data += lr_TSP * (
+            torch.outer(a_CA3_plus,  a_CA1_plus)
+          - torch.outer(a_CA3_minus, a_CA1_minus)
+        )
+        # ECout → CA1 back-projection: only plus phase contributes (minus-phase ECout = 0)
+        # Schapiro (2017) §2.b: ECout clamped only in Q4; no minus-phase ECout term
+        self.W_ECout.data += lr_MSP * torch.outer(a_ECout_plus, a_CA1_plus)
 
 
 # =========================================================================
@@ -856,53 +918,54 @@ class L_ECout(nn.Module):
         # requires_grad=False: updated manually via CHL.
         self.W = nn.Parameter(torch.zeros(n_CA1, n_items), requires_grad=False)
 
-        self.register_buffer('_activity', torch.zeros(n_items))
+        self.register_buffer('_Vm', torch.zeros(n_items))   # membrane potential (Euler state)
+        self.register_buffer('_y',  torch.zeros(n_items))   # firing rate (kWTA output)
 
     @property
     def activity(self) -> torch.Tensor:
-        return self._activity
+        return self._y
 
     def reset(self) -> None:
-        """Reset activity to zero before each trial (before Q1 minus phase)."""
-        self._activity.zero_()
+        """Reset Vm and y to zero before each trial (before Q1 minus phase)."""
+        self._Vm.zero_()
+        self._y.zero_()
 
     def clamp(self, target_pattern: torch.Tensor) -> None:
         """Clamp ECout to target pattern for the plus phase (Q4).
 
-        Overwrites _activity with the target item's ECin pattern.
-        This clamped activity is passed back to CA1 as the teaching signal.
+        Sets both _y and _Vm to the target so that the next Euler step
+        continues from the clamped state rather than the last predicted state.
         Schapiro (2017) §2.b: "in the plus phase, the model is directly
         shown the correct output."
         """
-        self._activity = target_pattern.clone().float()
+        self._y  = target_pattern.clone().float()
+        self._Vm = target_pattern.clone().float()
 
     def forward(self, a_CA1: torch.Tensor) -> torch.Tensor:
         """One settling step (minus phases Q1/Q2-Q3 only).
 
-        net     = W @ a_CA1
-        a_ECout = kWTA_k2(nxx1(net))    [k=2 absolute; Schapiro 2017 §2.a.ii]
-        Euler:  _activity = (1−tau) * _activity + tau * a_ECout
+        net        = W @ a_CA1
+        Vm(t)      = (1−tau) * Vm(t−1) + tau * net(t)
+        y_ECout(t) = kWTA_k2(nxx1(Vm(t)))   [k=2 absolute; Schapiro 2017 §2.a.ii]
 
         In plus phase, use clamp() instead — do not call forward().
         """
         # net input from CA1: W is (n_CA1, n_items), a_CA1 is (n_CA1,)
         # Schapiro (2017) §2.a.iv; O'Reilly & Munakata (2000) Ch. 2.
         net = a_CA1 @ self.W                   # (n_items,)
-        vm = F_nxx1(net)
 
-        # kWTA: absolute k=2 (Schapiro 2017 §2.a.ii)
-        # top-k threshold via kthvalue (stable under ties)
+        # Euler integration on membrane potential; O'Reilly & Munakata (2000) Ch. 2
+        if self.use_euler:
+            self._Vm = (1.0 - self.tau) * self._Vm + self.tau * net
+        else:
+            self._Vm = net
+
+        # Firing rate: nxx1 then kWTA absolute k=2; Schapiro (2017) §2.a.ii
+        vm = F_nxx1(self._Vm)
         k_from_bottom = self.n_items - self.k + 1
         threshold = torch.kthvalue(vm, k_from_bottom).values
-        new_act = vm * (vm >= threshold).float()
-
-        if self.use_euler:
-            # Euler: a(t) = (1−tau)*a(t−1) + tau*new_act
-            # O'Reilly & Munakata (2000) Ch. 2; tau=0.1 Leabra default
-            self._activity = (1.0 - self.tau) * self._activity + self.tau * new_act
-        else:
-            self._activity = new_act
-        return self._activity
+        self._y = vm * (vm >= threshold).float()
+        return self._y
 
     def update_weights(
         self,

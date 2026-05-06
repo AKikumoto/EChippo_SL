@@ -215,6 +215,34 @@ The Go reimplementation replaced kWTA with FFFB (feedforward-feedback inhibition
 FFFB is differentiable and approximates kWTA behavior.
 This PyTorch implementation uses hard kWTA for Steps 1–8 (biologically faithful), matching the principle established in BasalGangliaACC.
 
+### Training modes and kWTA policy
+
+Three modes determine how weights are trained and which kWTA variant is active.
+The `learnable: bool` flag on each layer controls `requires_grad`; kWTA type is separate.
+
+| Mode | Steps | `learnable` | kWTA | Weight update |
+|------|-------|-------------|------|---------------|
+| CHL (Hebbian) | 1–7 | False | Hard | Manual `.data +=` |
+| Backprop | 8 | True | Hard | `loss.backward()` + optimizer |
+| RSA fitting | future | True (frozen BG) | Soft (`F_kWTA_soft`) | optimizer over embedding only |
+
+**Why hard kWTA in backprop mode?**
+Hard kWTA is non-differentiable, but gradients still flow through the active units
+(the zero'd units contribute zero gradient, which is biologically plausible).
+The BGACC codebase uses the same policy: hard kWTA throughout Steps 1–8; soft kWTA
+only when RSA fitting requires a fully differentiable inhibition path.
+
+**`learnable` flag design:**
+`learnable=False` (default): weights are `nn.Parameter` with `requires_grad=False`.
+Manual CHL updates use `.data +=` — no gradient tape needed.
+`learnable=True`: switches `requires_grad=True` so a PyTorch optimizer can update
+the same weights. The CHL `update_weights()` methods still work in this mode;
+they bypass autograd by writing `.data` directly. Caller's responsibility to choose.
+
+**`F_kWTA_soft` (not yet implemented):**
+Soft kWTA via low-temperature softmax over pre-activation values.
+Differentiable approximation for RSA fitting. Deferred to the RSA fitting step.
+
 ---
 
 ## 6. CHL Learning Rule

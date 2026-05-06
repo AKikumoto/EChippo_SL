@@ -281,7 +281,6 @@ class L_DG(nn.Module):
         ecin_frac: float = 0.25,
         tau: float = 0.1,
         use_euler: bool = True,
-        learnable: bool = False,
     ):
         """
         Parameters
@@ -299,9 +298,6 @@ class L_DG(nn.Module):
             Euler integration time constant. Leabra default: 0.1.
         use_euler : bool
             If False, stateless mode (for unit tests).
-        learnable : bool
-            If True, weights have requires_grad=True (backprop mode, Step 8).
-            Default False: CHL mode — weights updated manually, no autograd.
         """
         super().__init__()
         self.n_input = n_input
@@ -314,8 +310,9 @@ class L_DG(nn.Module):
         # W_ECin_DG: sparse feedforward weights, TSP pathway
         # Schapiro (2017) §2.a.iii: 25% connectivity — each DG unit connects
         # to a random 25% of ECin units (re-randomized across 500 simulations).
-        # requires_grad=learnable: False in CHL mode; True enables backprop (Step 8).
-        self.W = nn.Parameter(torch.zeros(n_input, n_DG), requires_grad=learnable)
+        # requires_grad=False: CHL updates via .data +=; use W.requires_grad_(True)
+        # at the model level to switch to backprop mode when needed.
+        self.W = nn.Parameter(torch.zeros(n_input, n_DG), requires_grad=False)
 
         # Sparse connectivity mask: 1 where connection exists, 0 otherwise.
         # Schapiro (2017) §2.a.v: sparse projections randomized per network.
@@ -479,7 +476,6 @@ class L_CA3(nn.Module):
         dg_frac: float = 0.05,
         tau: float = 0.1,
         use_euler: bool = True,
-        learnable: bool = False,
     ):
         """
         Parameters
@@ -497,9 +493,6 @@ class L_CA3(nn.Module):
             Euler time constant. Leabra default: 0.1.
         use_euler : bool
             If False, stateless mode (for unit tests).
-        learnable : bool
-            If True, weights have requires_grad=True (backprop mode, Step 8).
-            Default False: CHL mode — weights updated manually, no autograd.
         """
         super().__init__()
         self.n_DG = n_DG
@@ -511,8 +504,9 @@ class L_CA3(nn.Module):
 
         # W_DG_CA3: feedforward mossy fibre weights, TSP pathway
         # Schapiro (2017) §2.a.iii: 5% sparse (mossy fibre).
-        # requires_grad=learnable: False in CHL mode; True enables backprop (Step 8).
-        self.W_ff = nn.Parameter(torch.zeros(n_DG, n_CA3), requires_grad=learnable)
+        # requires_grad=False: CHL updates via .data +=; use W_ff.requires_grad_(True)
+        # at the model level to switch to backprop mode when needed.
+        self.W_ff = nn.Parameter(torch.zeros(n_DG, n_CA3), requires_grad=False)
 
         # Sparse mossy fibre mask: 5% of DG → CA3 connections exist
         self.register_buffer(
@@ -522,8 +516,9 @@ class L_CA3(nn.Module):
 
         # W_CA3_CA3: recurrent weights (enable pattern completion)
         # Schapiro (2017) §2.a.iii: "fully connected (every unit to every other unit)"
-        # requires_grad=learnable: False in CHL mode; True enables backprop (Step 8).
-        self.W_rec = nn.Parameter(torch.zeros(n_CA3, n_CA3), requires_grad=learnable)
+        # requires_grad=False: CHL updates via .data +=; use W_rec.requires_grad_(True)
+        # at the model level to switch to backprop mode when needed.
+        self.W_rec = nn.Parameter(torch.zeros(n_CA3, n_CA3), requires_grad=False)
 
         # Separate Euler state (membrane potential) and firing rate.
         # Recurrent input is y (firing rate), not Vm (membrane potential).
@@ -692,7 +687,6 @@ class L_CA1(nn.Module):
         k_frac: float = 0.10,
         tau: float = 0.1,
         use_euler: bool = True,
-        learnable: bool = False,
     ):
         """
         Parameters
@@ -709,9 +703,6 @@ class L_CA1(nn.Module):
             Euler time constant. Leabra default: 0.1.
         use_euler : bool
             If False, stateless mode (for unit tests).
-        learnable : bool
-            If True, weights have requires_grad=True (backprop mode, Step 8).
-            Default False: CHL mode — weights updated manually, no autograd.
         """
         super().__init__()
         self.n_items = n_items
@@ -724,17 +715,17 @@ class L_CA1(nn.Module):
         # MSP: ECin → CA1 (slow; learns statistical regularities)
         # Schapiro (2017) §2.a.iv: "fully connected projections in the MSP"
         # lr_MSP = 0.05 (Go reimplementation; Schapiro 2017 §2.b)
-        self.W_ECin = nn.Parameter(torch.zeros(n_items, n_CA1), requires_grad=learnable)
+        self.W_ECin = nn.Parameter(torch.zeros(n_items, n_CA1), requires_grad=False)
 
         # TSP: CA3 → CA1 (fast; learns individual episodes)
         # Schapiro (2017) §2.a.iv: "CA3 then has a fully connected projection to CA1"
         # lr_TSP = 0.4 (Go reimplementation; Schapiro 2017 §2.b)
-        self.W_CA3 = nn.Parameter(torch.zeros(n_CA3, n_CA1), requires_grad=learnable)
+        self.W_CA3 = nn.Parameter(torch.zeros(n_CA3, n_CA1), requires_grad=False)
 
         # Back-projection from ECout (plus-phase teaching signal)
         # Schapiro (2017) §2.a.iv: ECout → CA1 "fully connected"
         # Completes the "big loop": ECin → CA1 → ECout → CA1
-        self.W_ECout = nn.Parameter(torch.zeros(n_items, n_CA1), requires_grad=learnable)
+        self.W_ECout = nn.Parameter(torch.zeros(n_items, n_CA1), requires_grad=False)
 
         self.register_buffer('_Vm', torch.zeros(n_CA1))   # membrane potential (Euler state)
         self.register_buffer('_y',  torch.zeros(n_CA1))   # firing rate (kWTA output)
@@ -901,7 +892,6 @@ class L_ECout(nn.Module):
         k: int = 2,
         tau: float = 0.1,
         use_euler: bool = True,
-        learnable: bool = False,
     ):
         """
         Parameters
@@ -917,9 +907,6 @@ class L_ECout(nn.Module):
             Euler time constant. Leabra default: 0.1.
         use_euler : bool
             If False, stateless mode (for unit tests).
-        learnable : bool
-            If True, weights have requires_grad=True (backprop mode, Step 8).
-            Default False: CHL mode — weights updated manually, no autograd.
         """
         super().__init__()
         self.n_CA1 = n_CA1
@@ -931,8 +918,9 @@ class L_ECout(nn.Module):
         # W_CA1_ECout: CA1 → ECout feedforward; fully connected
         # Schapiro (2017) §2.a.iv: "fully connected projections in the MSP
         # from ECin to CA1, CA1 to ECout, and ECout to CA1."
-        # requires_grad=learnable: False in CHL mode; True enables backprop (Step 8).
-        self.W = nn.Parameter(torch.zeros(n_CA1, n_items), requires_grad=learnable)
+        # requires_grad=False: CHL updates via .data +=; use W.requires_grad_(True)
+        # at the model level to switch to backprop mode when needed.
+        self.W = nn.Parameter(torch.zeros(n_CA1, n_items), requires_grad=False)
 
         self.register_buffer('_Vm', torch.zeros(n_items))   # membrane potential (Euler state)
         self.register_buffer('_y',  torch.zeros(n_items))   # firing rate (kWTA output)

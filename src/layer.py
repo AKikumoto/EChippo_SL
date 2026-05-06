@@ -687,6 +687,8 @@ class L_CA1(nn.Module):
         k_frac: float = 0.10,
         tau: float = 0.1,
         use_euler: bool = True,
+        lr_MSP: float = 0.05,
+        lr_TSP: float = 0.4,
     ):
         """
         Parameters
@@ -703,6 +705,10 @@ class L_CA1(nn.Module):
             Euler time constant. Leabra default: 0.1.
         use_euler : bool
             If False, stateless mode (for unit tests).
+        lr_MSP : float
+            MSP learning rate (ECin→CA1, ECout→CA1). Go reimplementation: 0.05.
+        lr_TSP : float
+            TSP learning rate (CA3→CA1). Go reimplementation: 0.4.
         """
         super().__init__()
         self.n_items = n_items
@@ -711,6 +717,8 @@ class L_CA1(nn.Module):
         self.k_frac = k_frac
         self.tau = tau
         self.use_euler = use_euler
+        self.lr_MSP = lr_MSP   # Schapiro 2017 §2.b Go reimplementation
+        self.lr_TSP = lr_TSP   # Schapiro 2017 §2.b Go reimplementation
 
         # MSP: ECin → CA1 (slow; learns statistical regularities)
         # Schapiro (2017) §2.a.iv: "fully connected projections in the MSP"
@@ -776,34 +784,32 @@ class L_CA1(nn.Module):
 
     def update_weights(
         self,
-        a_ECin_minus: torch.Tensor, a_ECin_plus: torch.Tensor,
+        a_ECin: torch.Tensor,
         a_CA3_minus: torch.Tensor, a_CA3_plus: torch.Tensor,
         a_ECout_plus: torch.Tensor,
         a_CA1_minus: torch.Tensor, a_CA1_plus: torch.Tensor,
-        lr_MSP: float, lr_TSP: float,
     ) -> None:
         """CHL weight updates for W_ECin (MSP), W_CA3 (TSP), W_ECout.
 
-        ΔW_ECin  = lr_MSP * (y_CA1_plus ⊗ a_ECin_plus  − y_CA1_minus ⊗ a_ECin_minus)
-        ΔW_CA3   = lr_TSP * (y_CA1_plus ⊗ a_CA3_plus   − y_CA1_minus ⊗ a_CA3_minus)
-        ΔW_ECout = lr_MSP * (y_CA1_plus ⊗ a_ECout_plus − 0)
-        lr_MSP = 0.05 (Go reimplementation); lr_TSP = 0.4.
+        Called once per trial after Q4. ECin is identical in minus and plus phases
+        (same stimulus throughout; Schapiro 2017 §2.c), so one tensor suffices.
+
+        ΔW_ECin  = lr_MSP * (a_CA1_plus ⊗ a_ECin  − a_CA1_minus ⊗ a_ECin)
+        ΔW_CA3   = lr_TSP * (a_CA1_plus ⊗ a_CA3_plus − a_CA1_minus ⊗ a_CA3_minus)
+        ΔW_ECout = lr_MSP * (a_CA1_plus ⊗ a_ECout_plus)   [no minus-phase ECout]
         O'Reilly & Munakata (2000) Ch. 4 Eq. 4.3; Schapiro (2017) §2.b.
         """
-        # W shapes: W_ECin (n_items, n_CA1), W_CA3 (n_CA3, n_CA1), W_ECout (n_items, n_CA1)
-        # MSP: ECin → CA1; slow learning rate accumulates community statistics
-        self.W_ECin.data += lr_MSP * (
-            torch.outer(a_ECin_plus,  a_CA1_plus)
-          - torch.outer(a_ECin_minus, a_CA1_minus)
+        # MSP: ECin → CA1; a_ECin same in both phases → factored as (plus − minus) ⊗ a_ECin
+        self.W_ECin.data += self.lr_MSP * torch.outer(
+            a_ECin, a_CA1_plus - a_CA1_minus
         )
-        # TSP: CA3 → CA1; fast learning rate binds individual episodes
-        self.W_CA3.data += lr_TSP * (
+        # TSP: CA3 → CA1; CA3 may differ between Q3 and Q4 end states
+        self.W_CA3.data += self.lr_TSP * (
             torch.outer(a_CA3_plus,  a_CA1_plus)
           - torch.outer(a_CA3_minus, a_CA1_minus)
         )
-        # ECout → CA1 back-projection: only plus phase contributes (minus-phase ECout = 0)
-        # Schapiro (2017) §2.b: ECout clamped only in Q4; no minus-phase ECout term
-        self.W_ECout.data += lr_MSP * torch.outer(a_ECout_plus, a_CA1_plus)
+        # ECout → CA1: plus phase only; Schapiro (2017) §2.b: ECout clamped only in Q4
+        self.W_ECout.data += self.lr_MSP * torch.outer(a_ECout_plus, a_CA1_plus)
 
 
 # =========================================================================

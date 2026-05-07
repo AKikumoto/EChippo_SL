@@ -24,13 +24,16 @@ Connection diagram (Schapiro et al. 2017 §2.a):
     W_ECout_CA1(n_ECin, n_CA1)    full (back-projection, Q4)     │   │
     W_CA1_ECout(n_CA1, n_ECin)    full (output)                  │   │
 
-| Layer   | Description               | Role                                   |
-|---------|---------------------------|----------------------------------------|
-| L_ECin  | Entorhinal cortex input   | Float activity clamp; big-loop ready   |
-| L_DG    | Dentate gyrus             | Pattern separation; ~1% kWTA           |
-| L_CA3   | CA3 field                 | Pattern completion; recurrent W_rec    |
-| L_CA1   | CA1 field                 | MSP + TSP convergence                  |
-| L_ECout | Entorhinal cortex output  | Reconstruction; plus-phase teacher     |
+| Layer       | Description               | Role                                      |
+|-------------|---------------------------|-------------------------------------------|
+| L_ECin      | Entorhinal cortex input   | Float activity clamp; big-loop ready      |
+| L_DG        | Dentate gyrus             | Pattern separation; ~1% kWTA              |
+| L_CA3       | CA3 field                 | Pattern completion; recurrent W_rec       |
+| L_CA1       | CA1 field                 | MSP + TSP convergence                     |
+| L_ECout     | Entorhinal cortex output  | Reconstruction; plus-phase teacher        |
+| L_PFC_RNN   | PFC vanilla RNN           | ECout → PFC hidden → net_pfc → ECin       |
+| L_PFC_GRU   | PFC GRU                   | ECout → PFC hidden → net_pfc → ECin       |
+| L_PFC_LSTM  | PFC LSTM                  | ECout → PFC hidden → net_pfc → ECin       |
 
 Circuit from Schapiro et al. (2017) Phil. Trans. R. Soc. B, 372, 20160049.
 See config/ARCHITECTURE_ENG.md for full equations, parameters, and CHL settling policy.
@@ -281,6 +284,7 @@ class L_DG(nn.Module):
         ecin_frac: float = 0.25,
         tau: float = 0.1,
         use_euler: bool = True,
+        lr: float = 0.4,
     ):
         """
         Parameters
@@ -298,6 +302,8 @@ class L_DG(nn.Module):
             Euler integration time constant. Leabra default: 0.1.
         use_euler : bool
             If False, stateless mode (for unit tests).
+        lr : float
+            TSP learning rate. Go reimplementation: 0.4. (Schapiro 2017 §2.b)
         """
         super().__init__()
         self.n_input = n_input
@@ -306,6 +312,7 @@ class L_DG(nn.Module):
         self.ecin_frac = ecin_frac
         self.tau = tau
         self.use_euler = use_euler
+        self.lr = lr
 
         # W_ECin_DG: sparse feedforward weights, TSP pathway
         # Schapiro (2017) §2.a.iii: 25% connectivity — each DG unit connects
@@ -370,7 +377,6 @@ class L_DG(nn.Module):
     def update_weights(
         self, a_ECin_minus: torch.Tensor, a_ECin_plus: torch.Tensor,
         a_DG_minus: torch.Tensor, a_DG_plus: torch.Tensor,
-        lr: float,
     ) -> None:
         """CHL weight update for W_ECin_DG.
 
@@ -383,7 +389,7 @@ class L_DG(nn.Module):
         delta_minus = torch.outer(a_ECin_minus, a_DG_minus)
         # Apply mask: non-connected weights stay at zero
         # Schapiro (2017) §2.a.v: connectivity pattern is fixed per network init
-        self.W.data += lr * self.mask * (delta_plus - delta_minus)
+        self.W.data += self.lr * self.mask * (delta_plus - delta_minus)
 
 
 # =========================================================================
@@ -476,6 +482,7 @@ class L_CA3(nn.Module):
         dg_frac: float = 0.05,
         tau: float = 0.1,
         use_euler: bool = True,
+        lr: float = 0.4,
     ):
         """
         Parameters
@@ -493,6 +500,8 @@ class L_CA3(nn.Module):
             Euler time constant. Leabra default: 0.1.
         use_euler : bool
             If False, stateless mode (for unit tests).
+        lr : float
+            TSP learning rate. Go reimplementation: 0.4. (Schapiro 2017 §2.b)
         """
         super().__init__()
         self.n_DG = n_DG
@@ -501,6 +510,7 @@ class L_CA3(nn.Module):
         self.dg_frac = dg_frac
         self.tau = tau
         self.use_euler = use_euler
+        self.lr = lr
 
         # W_DG_CA3: feedforward mossy fibre weights, TSP pathway
         # Schapiro (2017) §2.a.iii: 5% sparse (mossy fibre).
@@ -565,7 +575,6 @@ class L_CA3(nn.Module):
         self,
         a_DG_minus: torch.Tensor, a_DG_plus: torch.Tensor,
         a_CA3_minus: torch.Tensor, a_CA3_plus: torch.Tensor,
-        lr: float,
     ) -> None:
         """CHL weight update for W_DG_CA3 and W_CA3_CA3.
 
@@ -577,14 +586,14 @@ class L_CA3(nn.Module):
         # Feedforward (mossy fibre): W_ff is (n_DG, n_CA3)
         delta_ff = (torch.outer(a_DG_plus,  a_CA3_plus)
                   - torch.outer(a_DG_minus, a_CA3_minus))
-        self.W_ff.data += lr * self.mask_ff * delta_ff
+        self.W_ff.data += self.lr * self.mask_ff * delta_ff
 
         # Recurrent (Hopfield auto-association): W_rec is (n_CA3, n_CA3)
         # pre = post = CA3 activity → symmetric weight update
         # Schapiro (2017) §2.a.iii: "helps bind pieces of a representation"
         delta_rec = (torch.outer(a_CA3_plus,  a_CA3_plus)
                    - torch.outer(a_CA3_minus, a_CA3_minus))
-        self.W_rec.data += lr * delta_rec
+        self.W_rec.data += self.lr * delta_rec
 
 
 # =========================================================================
@@ -898,6 +907,7 @@ class L_ECout(nn.Module):
         k: int = 2,
         tau: float = 0.1,
         use_euler: bool = True,
+        lr: float = 0.05,
     ):
         """
         Parameters
@@ -913,6 +923,8 @@ class L_ECout(nn.Module):
             Euler time constant. Leabra default: 0.1.
         use_euler : bool
             If False, stateless mode (for unit tests).
+        lr : float
+            Output learning rate. Go reimplementation: 0.05. (Schapiro 2017 §2.b)
         """
         super().__init__()
         self.n_CA1 = n_CA1
@@ -920,6 +932,7 @@ class L_ECout(nn.Module):
         self.k = k           # Schapiro (2017) §2.a.ii: k=2 (absolute)
         self.tau = tau
         self.use_euler = use_euler
+        self.lr = lr
 
         # W_CA1_ECout: CA1 → ECout feedforward; fully connected
         # Schapiro (2017) §2.a.iv: "fully connected projections in the MSP
@@ -981,14 +994,149 @@ class L_ECout(nn.Module):
         self,
         a_CA1_minus: torch.Tensor, a_CA1_plus: torch.Tensor,
         a_ECout_minus: torch.Tensor, a_ECout_plus: torch.Tensor,
-        lr: float,
     ) -> None:
         """CHL weight update for W_CA1_ECout.
 
-        ΔW = lr * (y_ECout_plus ⊗ a_CA1_plus − y_ECout_minus ⊗ a_CA1_minus)
+        ΔW = lr * (a_CA1_plus ⊗ a_ECout_plus − a_CA1_minus ⊗ a_ECout_minus)
         O'Reilly & Munakata (2000) Ch. 4 Eq. 4.3; Schapiro (2017) §2.b.
         """
         # W is (n_CA1, n_items): outer(a_CA1, a_ECout) has correct shape.
         delta_plus  = torch.outer(a_CA1_plus,  a_ECout_plus)
         delta_minus = torch.outer(a_CA1_minus, a_ECout_minus)
-        self.W.data += lr * (delta_plus - delta_minus)
+        self.W.data += self.lr * (delta_plus - delta_minus)
+
+
+# =========================================================================
+# L_PFC_*: PREFRONTAL CORTEX RECURRENT LAYERS
+# =========================================================================
+# [Role]:
+#   Recurrent PFC module that receives ECout activity each cycle and projects
+#   a net input back to ECin, closing the ECout → PFC → ECin loop.
+#
+#   Injection pattern at model level (M_HipSL_KM):
+#       net_pfc       = pfc(a_ECout)
+#       a_ecin        = ecin(clamp, net_pfc=net_pfc)
+#
+# [Three variants — copied and adapted from EmbeddingRNN/src/layer.py]:
+#   L_PFC_RNN  — vanilla Elman RNN; interpretable; short sequences
+#   L_PFC_GRU  — GRU; recommended default; fewer params than LSTM
+#   L_PFC_LSTM — LSTM; tuple hidden (h, c); long-range carry-over
+#
+#   Key differences vs. EmbeddingRNN:
+#   - Explicit params (not cfg dict); consistent with EChipp_SL style.
+#   - forward(a_ECout) → net_pfc (n_ECin,) for direct ECin injection.
+#   - reset() zeroes hidden state at trial start.
+#   - h property exposes hidden state (n_hidden,) for n_stable/n_dynamic analysis.
+#   - No readout/logits layer; output IS the ECin projection.
+#   - Trained with backprop (requires_grad=True by default); orthogonal to CHL layers.
+
+
+class L_PFC_RNN(nn.Module):
+    """Vanilla Elman RNN: ECout → PFC hidden → net input to ECin.
+
+    Parameters
+    ----------
+    n_ECout : int
+        Input size (ECout activity; = n_items).
+    n_hidden : int
+        PFC recurrent hidden units.
+    n_ECin : int
+        Output projection size (= L_ECin.n_units).
+    """
+
+    def __init__(self, n_ECout: int, n_hidden: int, n_ECin: int):
+        super().__init__()
+        self.n_hidden  = n_hidden
+        self.rnn       = nn.RNN(n_ECout, n_hidden, batch_first=True)
+        self.proj_ecin = nn.Linear(n_hidden, n_ECin)
+        self._hidden: torch.Tensor | None = None
+
+    def reset(self) -> None:
+        """Zero hidden state. Call once per trial before Q1."""
+        self._hidden = None
+
+    @property
+    def h(self) -> torch.Tensor | None:
+        """Current hidden state (n_hidden,) for n_stable/n_dynamic analysis."""
+        return None if self._hidden is None else self._hidden[0, 0]
+
+    def forward(self, a_ECout: torch.Tensor) -> torch.Tensor:
+        """One RNN step. Returns net_pfc to inject into L_ECin.forward()."""
+        x = a_ECout.unsqueeze(0).unsqueeze(0)           # (1, 1, n_ECout)
+        _, self._hidden = self.rnn(x, self._hidden)     # (1, 1, n_hidden)
+        return self.proj_ecin(self._hidden[0, 0])       # (n_ECin,)
+
+
+class L_PFC_GRU(nn.Module):
+    """GRU recurrent PFC: ECout → PFC hidden → net input to ECin.
+
+    Parameters
+    ----------
+    n_ECout : int
+        Input size (ECout activity; = n_items).
+    n_hidden : int
+        PFC recurrent hidden units.
+    n_ECin : int
+        Output projection size (= L_ECin.n_units).
+    """
+
+    def __init__(self, n_ECout: int, n_hidden: int, n_ECin: int):
+        super().__init__()
+        self.n_hidden  = n_hidden
+        self.rnn       = nn.GRU(n_ECout, n_hidden, batch_first=True)
+        self.proj_ecin = nn.Linear(n_hidden, n_ECin)
+        self._hidden: torch.Tensor | None = None
+
+    def reset(self) -> None:
+        """Zero hidden state. Call once per trial before Q1."""
+        self._hidden = None
+
+    @property
+    def h(self) -> torch.Tensor | None:
+        """Current hidden state (n_hidden,) for n_stable/n_dynamic analysis."""
+        return None if self._hidden is None else self._hidden[0, 0]
+
+    def forward(self, a_ECout: torch.Tensor) -> torch.Tensor:
+        """One GRU step. Returns net_pfc to inject into L_ECin.forward()."""
+        x = a_ECout.unsqueeze(0).unsqueeze(0)
+        _, self._hidden = self.rnn(x, self._hidden)
+        return self.proj_ecin(self._hidden[0, 0])       # (n_ECin,)
+
+
+class L_PFC_LSTM(nn.Module):
+    """LSTM recurrent PFC: ECout → PFC hidden → net input to ECin.
+
+    hidden is a tuple (h_n, c_n); only h_n is projected to ECin.
+    Use when cross-trial carry-over or long-range dependencies are needed.
+
+    Parameters
+    ----------
+    n_ECout : int
+        Input size (ECout activity; = n_items).
+    n_hidden : int
+        PFC recurrent hidden units.
+    n_ECin : int
+        Output projection size (= L_ECin.n_units).
+    """
+
+    def __init__(self, n_ECout: int, n_hidden: int, n_ECin: int):
+        super().__init__()
+        self.n_hidden  = n_hidden
+        self.rnn       = nn.LSTM(n_ECout, n_hidden, batch_first=True)
+        self.proj_ecin = nn.Linear(n_hidden, n_ECin)
+        self._hidden: tuple[torch.Tensor, torch.Tensor] | None = None
+
+    def reset(self) -> None:
+        """Zero hidden and cell states. Call once per trial before Q1."""
+        self._hidden = None
+
+    @property
+    def h(self) -> torch.Tensor | None:
+        """Current h_n (n_hidden,) for n_stable/n_dynamic analysis (not c_n)."""
+        return None if self._hidden is None else self._hidden[0][0, 0]
+
+    def forward(self, a_ECout: torch.Tensor) -> torch.Tensor:
+        """One LSTM step. Returns net_pfc to inject into L_ECin.forward()."""
+        x = a_ECout.unsqueeze(0).unsqueeze(0)
+        _, self._hidden = self.rnn(x, self._hidden)     # hidden: (h_n, c_n)
+        return self.proj_ecin(self._hidden[0][0, 0])    # h_n[0,0]: (n_ECin,)

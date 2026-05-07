@@ -77,6 +77,101 @@ sup.ref{font-size:9px;color:#2563eb;font-weight:500}
   <text x="666" y="205" text-anchor="end" style="font-size:10px;fill:#888">Schapiro et al. 2017 [1]</text>
 </svg>
 
+<!-- phase flow — trial structure (Schapiro 2017 §2.b) -->
+<div style="margin:8px 0 14px 0">
+<div style="font-size:11px;font-weight:500;color:#555;margin-bottom:6px">Trial phase structure — theta oscillation <span style="font-weight:400;color:#888">(Schapiro 2017 §2.b; 100 cycles per trial)</span></div>
+<div style="display:flex;gap:6px">
+
+<div style="flex:1;min-width:0">
+<svg width="100%" viewBox="0 0 240 128">
+  <defs>
+    <marker id="am-q1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <marker id="at-q1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <rect x="1" y="1" width="238" height="126" rx="6" fill="#fafafa" stroke="#e0e0e0" stroke-width="0.75"/>
+  <text x="120" y="14" text-anchor="middle" style="font-size:11px;font-weight:600;fill:#333">Q1 — cycles 1–25</text>
+  <text x="120" y="25" text-anchor="middle" style="font-size:9.5px;fill:#777">theta trough · ECin dominant · encoding</text>
+  <rect x="5" y="33" width="42" height="60" rx="5" fill="#E1F5EE" stroke="#085041" stroke-width="1.5"/>
+  <text x="26" y="58" text-anchor="middle" style="font-size:11px;font-weight:500;fill:#085041">ECin</text>
+  <text x="26" y="70" text-anchor="middle" style="font-size:9px;fill:#085041">active</text>
+  <rect x="82" y="12" width="46" height="48" rx="5" fill="#FAEEDA" stroke="#ddd" stroke-width="0.75"/>
+  <text x="105" y="34" text-anchor="middle" style="font-size:11px;font-weight:500;fill:#c0a070">CA3</text>
+  <text x="105" y="47" text-anchor="middle" style="font-size:9px;fill:#c0a070">inhibited→CA1</text>
+  <rect x="140" y="33" width="46" height="60" rx="5" fill="#EEEDFE" stroke="#26215C" stroke-width="1.5"/>
+  <text x="163" y="58" text-anchor="middle" style="font-size:11px;font-weight:500;fill:#26215C">CA1</text>
+  <text x="163" y="70" text-anchor="middle" style="font-size:9px;fill:#26215C">MSP driven</text>
+  <rect x="194" y="45" width="40" height="36" rx="5" fill="#F1EFE8" stroke="#ddd" stroke-width="0.75"/>
+  <text x="214" y="66" text-anchor="middle" style="font-size:10px;font-weight:500;fill:#bbb">ECout</text>
+  <path d="M47 65 Q93 95 140 65" fill="none" stroke="#534AB7" stroke-width="2.5" marker-end="url(#am-q1)"/>
+  <text x="93" y="96" text-anchor="middle" style="font-size:9px;font-weight:500;fill:#534AB7">MSP</text>
+  <path d="M47 50 Q65 35 82 28" fill="none" stroke="#1D9E75" stroke-width="1.2" marker-end="url(#at-q1)"/>
+  <line x1="128" y1="43" x2="140" y2="53" stroke="#ccc" stroke-width="1" stroke-dasharray="3 2"/>
+  <text x="128" y="38" text-anchor="start" style="font-size:8px;fill:#bbb">TSP ✗</text>
+  <line x1="186" y1="63" x2="194" y2="63" stroke="#ddd" stroke-width="0.75"/>
+</svg>
+</div>
+
+<div style="flex:1;min-width:0">
+<svg width="100%" viewBox="0 0 240 128">
+  <defs>
+    <marker id="at-q23" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#1D9E75" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <rect x="1" y="1" width="238" height="126" rx="6" fill="#fafafa" stroke="#e0e0e0" stroke-width="0.75"/>
+  <text x="120" y="14" text-anchor="middle" style="font-size:11px;font-weight:600;fill:#333">Q2–Q3 — cycles 26–75</text>
+  <text x="120" y="25" text-anchor="middle" style="font-size:9.5px;fill:#777">theta peak · CA3 dominant · retrieval</text>
+  <rect x="5" y="33" width="42" height="60" rx="5" fill="#E1F5EE" stroke="#ddd" stroke-width="0.75"/>
+  <text x="26" y="58" text-anchor="middle" style="font-size:11px;font-weight:500;fill:#7aaa98">ECin</text>
+  <text x="26" y="70" text-anchor="middle" style="font-size:9px;fill:#7aaa98">reduced</text>
+  <rect x="82" y="12" width="46" height="48" rx="5" fill="#FAEEDA" stroke="#633806" stroke-width="1.5"/>
+  <text x="105" y="32" text-anchor="middle" style="font-size:11px;font-weight:500;fill:#633806">CA3</text>
+  <text x="105" y="43" text-anchor="middle" style="font-size:9px;fill:#633806">↺ recurrent</text>
+  <text x="105" y="54" text-anchor="middle" style="font-size:9px;fill:#633806">completes</text>
+  <rect x="140" y="33" width="46" height="60" rx="5" fill="#EEEDFE" stroke="#26215C" stroke-width="1.5"/>
+  <text x="163" y="58" text-anchor="middle" style="font-size:11px;font-weight:500;fill:#26215C">CA1</text>
+  <text x="163" y="70" text-anchor="middle" style="font-size:9px;fill:#26215C">TSP driven</text>
+  <rect x="194" y="45" width="40" height="36" rx="5" fill="#F1EFE8" stroke="#ddd" stroke-width="0.75"/>
+  <text x="214" y="66" text-anchor="middle" style="font-size:10px;font-weight:500;fill:#bbb">ECout</text>
+  <path d="M128 43 Q134 60 140 55" fill="none" stroke="#1D9E75" stroke-width="2.5" marker-end="url(#at-q23)"/>
+  <text x="116" y="42" text-anchor="end" style="font-size:9px;font-weight:500;fill:#1D9E75">TSP</text>
+  <path d="M47 50 Q65 35 82 28" fill="none" stroke="#1D9E75" stroke-width="1.2" marker-end="url(#at-q23)"/>
+  <path d="M47 65 Q93 95 140 65" fill="none" stroke="#534AB7" stroke-width="1" stroke-dasharray="4 3" opacity="0.3"/>
+  <text x="93" y="97" text-anchor="middle" style="font-size:9px;fill:#bbb">MSP ↓</text>
+  <line x1="186" y1="63" x2="194" y2="63" stroke="#ddd" stroke-width="0.75"/>
+</svg>
+</div>
+
+<div style="flex:1;min-width:0">
+<svg width="100%" viewBox="0 0 240 128">
+  <defs>
+    <marker id="ao-q4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#2C2C2A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <rect x="1" y="1" width="238" height="126" rx="6" fill="#fafafa" stroke="#e0e0e0" stroke-width="0.75"/>
+  <text x="120" y="14" text-anchor="middle" style="font-size:11px;font-weight:600;fill:#333">Q4 — cycles 76–100</text>
+  <text x="120" y="25" text-anchor="middle" style="font-size:9.5px;fill:#777">plus phase · ECout → CA1 back-proj · ΔW</text>
+  <rect x="5" y="33" width="42" height="60" rx="5" fill="#E1F5EE" stroke="#ddd" stroke-width="0.75"/>
+  <text x="26" y="61" text-anchor="middle" style="font-size:11px;font-weight:500;fill:#7aaa98">ECin</text>
+  <rect x="82" y="12" width="46" height="48" rx="5" fill="#FAEEDA" stroke="#ddd" stroke-width="0.75"/>
+  <text x="105" y="34" text-anchor="middle" style="font-size:11px;font-weight:500;fill:#c0a070">CA3</text>
+  <text x="105" y="47" text-anchor="middle" style="font-size:9px;fill:#c0a070">continues</text>
+  <rect x="138" y="33" width="48" height="60" rx="5" fill="#EEEDFE" stroke="#26215C" stroke-width="1.5"/>
+  <text x="162" y="55" text-anchor="middle" style="font-size:11px;font-weight:500;fill:#26215C">CA1</text>
+  <text x="162" y="66" text-anchor="middle" style="font-size:9px;fill:#26215C">corrected</text>
+  <text x="162" y="77" text-anchor="middle" style="font-size:9px;fill:#26215C">→ ActP</text>
+  <rect x="193" y="33" width="44" height="60" rx="5" fill="#eeeeff" stroke="#2C2C2A" stroke-width="1.5"/>
+  <text x="215" y="55" text-anchor="middle" style="font-size:10px;font-weight:500;fill:#2C2C2A">ECout</text>
+  <text x="215" y="66" text-anchor="middle" style="font-size:9px;fill:#2C2C2A">clamped</text>
+  <text x="215" y="77" text-anchor="middle" style="font-size:9px;fill:#444">= target</text>
+  <path d="M215 33 Q189 8 162 33" fill="none" stroke="#2C2C2A" stroke-width="2.5" marker-end="url(#ao-q4)"/>
+  <text x="189" y="8" text-anchor="middle" style="font-size:9px;font-weight:500;fill:#2C2C2A">back-proj</text>
+  <path d="M47 65 Q92 95 138 65" fill="none" stroke="#534AB7" stroke-width="1" opacity="0.25"/>
+  <line x1="128" y1="43" x2="138" y2="53" stroke="#1D9E75" stroke-width="1" opacity="0.25"/>
+  <text x="120" y="118" text-anchor="middle" style="font-size:8.5px;fill:#555">ΔW = lr × (ActP ⊗ ActP − ActM ⊗ ActM)</text>
+</svg>
+</div>
+
+</div>
+</div>
+
 <div class="col-hdrs">
   <div class="col-hdr-r">Region</div>
   <div class="col-hdrs-inner">

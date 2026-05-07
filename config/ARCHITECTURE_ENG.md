@@ -91,8 +91,14 @@ TSP's path through DG enforces pattern separation: even similar inputs activate 
 | CA3 | CA1 | Feed-forward | Full (all-to-all) | Yes (TSP) |
 | CA1 | ECout | Feed-forward | Full (all-to-all) | Yes |
 | ECout | CA1 | Back-projection | Full (all-to-all) | Yes (plus-phase teaching signal) |
+| ECout | ECin | Back-projection | Full (all-to-all) | Yes (big loop; MSP rate) |
 
-**Input layer (Schapiro 2017 §2.a.ii):** A separate Input layer (not shown in Fig. 1) has one-to-one connections to ECin. Input is clamped here — this allows ECin to also receive ECout back-projections (the "big loop"), without the clamp disrupting the stimulus representation.
+**Input layer (Schapiro 2017 §2.a.ii) — not needed in PyTorch:**
+The paper describes a separate Input layer (one-to-one with ECin) whose purpose is to allow ECin to receive both the clamped stimulus *and* ECout back-projections simultaneously.
+In emergent/Leabra a layer can be either clamped or driven by learned weights, but not both; the Input layer was the workaround.
+In PyTorch there is no such constraint: `clamp_pattern` (the stimulus tensor) and `a_ECout @ W_ECout` (the back-projection) are simply summed in `L_ECin.forward()`.
+`clamp_pattern` plays exactly the role of the Input layer's output; no separate module is needed.
+The ECout→ECin weight matrix `W_ECout` lives in `L_ECin` (receiving-layer convention) and is learned via CHL at lr_MSP = 0.05.
 
 ---
 
@@ -103,11 +109,11 @@ TSP's path through DG enforces pattern separation: even similar inputs activate 
 ### L_ECin — Entorhinal Cortex Input
 
 - Localist representation: one unit per item (n_items units)
-- No learning in ECin itself; it is the input driver
-- **Moving window (Schapiro 2017 §2.c):** ECin receives activity for both the current and previous item. Current item = 1.0 (clamped); previous item = 0.9 (decayed). This temporal asymmetry is the source of directional learning (forward bias).
-- **Separate Input layer:** A hidden Input layer (one-to-one with ECin) holds the clamped stimulus, allowing ECin to also receive ECout back-projections without conflict.
+- **Moving window (Schapiro 2017 §2.c):** ECin receives activity for both the current and previous item. Current item = 1.0 (clamped); previous item = 0.9 (decayed). This temporal asymmetry is the source of directional learning (forward bias). Construction of the moving-window vector is the model's (M_HipSL) responsibility.
+- **Big loop — ECout→ECin back-projection:** `W_ECout` (n_ECout, n_units) lives in `L_ECin`. `forward(clamp_pattern, a_ECout)` computes `net = clamp_pattern + a_ECout @ W_ECout`. Learned via CHL at lr_MSP = 0.05. Enable by passing `n_ECout` at construction; disabled (None) by default.
+- **No separate Input layer needed in PyTorch** — see §3 Projections table note.
 - Inhibition: k = 2 (absolute; paper §2.a.ii — two units active at a time)
-- In all phases: same ECin pattern (stimulus does not change across minus/plus phases)
+- In all phases: same ECin clamp_pattern (stimulus does not change across minus/plus phases)
 
 ### L_DG — Dentate Gyrus
 
@@ -265,31 +271,32 @@ Schapiro (2017) §2.b, citing Hasselmo et al. (2002) Neural Comput. [ref 27] and
 
 The model has **no theta generator** — theta is imposed externally as a trial phase structure.
 
-### Theta modes in M_HipSL
+### Theta modes — current implementation vs. planned
 
-Two implementation modes, controlled by `theta_mode` in `M_HipSL`:
+Two modes were planned. Only `theta_discrete` is currently active; `theta_oscillation` is deferred.
 
-| Mode | Implementation | Source | Steps |
-|------|---------------|--------|-------|
-| `theta_discrete` | Q1/Q2-Q3/Q4 hardcoded; inhibited pathway receives zeros | Schapiro (2017) §2.b | 1–8 |
-| `theta_oscillation` | FFFB inhibition modulated by sinusoidal wave; phase detected by activity stability | Singh et al. (2022) PNAS Methods | sleep extension |
+| Mode | Implementation | Source | Status |
+|------|---------------|--------|--------|
+| `theta_discrete` | Caller passes zeros for the inhibited pathway each cycle | Schapiro (2017) §2.b | **active (Steps 1–8)** |
+| `theta_oscillation` | FFFB conductance oscillates sinusoidally; phase auto-detected | Singh et al. (2022) PNAS Methods | deferred (sleep extension) |
 
-**`theta_discrete`** (default, Steps 1–8):
-Each trial = 100 cycles. Phase switching = caller passes zeros for the inhibited pathway:
-- Q1 (cycles 1–25): `a_CA3 = zeros` passed to CA1
-- Q2-Q3 (cycles 26–75): `a_ECin = zeros` passed to CA1
-- Q4 (cycles 76–100): `a_ECout = target` passed to CA1; ECout clamped
+**`theta_discrete`** — implemented as a caller convention, not a flag:
+No `theta_mode` parameter exists in any current layer or model class.
+Phase switching is achieved by what the training loop passes to `L_CA1.forward()`:
+- Q1 (cycles 1–25): `a_CA3 = zeros(n_CA3)` passed to CA1 (ECin-dominant)
+- Q2-Q3 (cycles 26–75): `a_ECin = zeros(n_items)` passed to CA1 (CA3-dominant)
+- Q4 (cycles 76–100): all three inputs active; ECout clamped to target
 
-**`theta_oscillation`** (Singh sleep extension, deferred):
+This convention is simpler than a flag: the training loop in `M_HipSL` is responsible for constructing the right zero tensors for each quarter. Layers remain phase-agnostic.
+
+**`theta_oscillation`** (deferred):
 FFFB inhibition conductance oscillates sinusoidally (Singh 2022 Methods):
 ```
 Gi_c = G_idef * A * sin(2π * (P * c)⁻¹) + S
 ```
 Plus/minus phases detected autonomously by activity stability — no external phase signal needed.
 Short-term synaptic depression drives attractor transitions, generating interleaved replay.
-
-**`learnable` (backprop mode) is orthogonal to `theta_mode`**:
-`learnable=True` enables gradient flow through weights; `theta_mode` determines how phases are generated. Both can be set independently.
+Will require `F_fffb` in `util.py` and a refactor of the inhibition path in settling layers.
 
 ---
 
@@ -403,14 +410,15 @@ self._activity = (1 - self.tau) * self._activity + self.tau * new_act
 | Step | Build | File | Test | Status |
 |------|-------|------|------|--------|
 | 1 | `F_nxx1`, `F_kWTA` activation functions | `src/util.py` | `notebook/test_nxx1.ipynb` | **done** |
-| 2 | `L_ECin`, `L_ECout` | `src/layer.py` | `notebook/test_layers.ipynb` | **done** |
-| 3 | `L_DG` (sparse kWTA, pattern separation) | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
-| 4 | `L_CA3` (recurrent attractor, Euler) | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
-| 5 | `L_CA1` (MSP + TSP convergence, Euler) | `src/layer.py` | `notebook/test_layers.ipynb` | not started |
-| 6 | `CommunityGraphEnv`, `CommunityGraphDataset` | `src/tasks.py` | `notebook/test_task.ipynb` | not started |
-| 7 | `M_HipSL` assembly + CHL training loop | `src/model.py` | `notebook/test_full_model.ipynb` | not started |
-| 8 | Reproduce Schapiro 2017 (RSA, pattern completion) | notebooks | `notebook/test_full_model.ipynb` | not started |
-| 9 | `RuleActionEnv`, `RuleActionDataset` — K&M task with rate-coded ECin | `src/tasks.py` | `notebook/test_task.ipynb` | not started |
+| 2 | `L_ECin` (+ `W_ECout` big loop), `L_ECout` | `src/layer.py` | *(no separate notebook; covered by layer tests)* | **done** |
+| 3 | `L_DG` (sparse kWTA, pattern separation) | `src/layer.py` | `notebook/test_layer_DG.ipynb` | **done** |
+| 4 | `L_CA3` (recurrent attractor, Euler) | `src/layer.py` | `notebook/test_layer_CA3.ipynb` | **done** |
+| 5 | `L_CA1` (MSP + TSP convergence, Euler) | `src/layer.py` | `notebook/test_layer_CA1.ipynb` | **done** |
+| 5b | `L_PFC` (RNN/GRU/LSTM; ECout→PFC→ECin; K&M extension) | `src/layer.py` | *(no test notebook yet)* | **done** |
+| 6 | `T_PairEnv/Dataset`, `T_CommunityGraphEnv/Dataset`, task viz | `src/tasks.py` | `notebook/test_task_community.ipynb`, `notebook/test_task_pair.ipynb` | **done** |
+| 7 | `M_HipSL` assembly + CHL training loop (theta_discrete convention) | `src/model.py` | `notebook/test_full_model.ipynb` | **next** |
+| 8 | Reproduce Schapiro 2017 (RSA, pattern completion, community clustering) | notebooks | `notebook/test_full_model.ipynb` | not started |
+| 9 | `RuleActionEnv`, `RuleActionDataset` — K&M task with rate-coded ECin | `src/tasks.py` | `notebook/test_task_km.ipynb` | not started |
 | 10 | Train M_HipSL on K&M task; read out CA1 RSA vs. RSRCONJ matrix | notebooks | `notebook/test_full_model.ipynb` | not started |
 
 ---

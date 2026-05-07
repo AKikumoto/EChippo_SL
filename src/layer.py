@@ -31,9 +31,7 @@ Connection diagram (Schapiro et al. 2017 §2.a):
 | L_CA3       | CA3 field                 | Pattern completion; recurrent W_rec       |
 | L_CA1       | CA1 field                 | MSP + TSP convergence                     |
 | L_ECout     | Entorhinal cortex output  | Reconstruction; plus-phase teacher        |
-| L_PFC_RNN   | PFC vanilla RNN           | ECout → PFC hidden → net_pfc → ECin       |
-| L_PFC_GRU   | PFC GRU                   | ECout → PFC hidden → net_pfc → ECin       |
-| L_PFC_LSTM  | PFC LSTM                  | ECout → PFC hidden → net_pfc → ECin       |
+| L_PFC       | PFC recurrent (RNN/GRU/LSTM) | ECout → PFC hidden → net_pfc → ECin    |
 
 Circuit from Schapiro et al. (2017) Phil. Trans. R. Soc. B, 372, 20160049.
 See config/ARCHITECTURE_ENG.md for full equations, parameters, and CHL settling policy.
@@ -865,7 +863,7 @@ class L_CA1(nn.Module):
 #
 # [Learning — CHL]:
 #   W_CA1_ECout updated via CHL, same rate as MSP.
-#   ΔW = lr * (y_ECout_plus ⊗ a_CA1_plus − y_ECout_minus ⊗ a_CA1_minus)
+#   ΔW = lr * (a_CA1_plus ⊗ a_ECout_plus − a_CA1_minus ⊗ a_ECout_minus)
 #   O'Reilly & Munakata (2000) Ch. 4 Eq. 4.3; Schapiro (2017) §2.b.
 #
 # [Connections]:
@@ -961,8 +959,8 @@ class L_ECout(nn.Module):
         Schapiro (2017) §2.b: "in the plus phase, the model is directly
         shown the correct output."
         """
-        self._y  = target_pattern.clone().float()
-        self._Vm = target_pattern.clone().float()
+        self._y.copy_(target_pattern.float())
+        self._Vm.copy_(target_pattern.float())
 
     def forward(self, a_CA1: torch.Tensor) -> torch.Tensor:
         """One settling step (minus phases Q1/Q2-Q3 only).
@@ -1007,7 +1005,7 @@ class L_ECout(nn.Module):
 
 
 # =========================================================================
-# L_PFC_*: PREFRONTAL CORTEX RECURRENT LAYERS
+# L_PFC: PREFRONTAL CORTEX RECURRENT LAYER
 # =========================================================================
 # [Role]:
 #   Recurrent PFC module that receives ECout activity each cycle and projects
@@ -1017,12 +1015,12 @@ class L_ECout(nn.Module):
 #       net_pfc       = pfc(a_ECout)
 #       a_ecin        = ecin(clamp, net_pfc=net_pfc)
 #
-# [Three variants — copied and adapted from EmbeddingRNN/src/layer.py]:
-#   L_PFC_RNN  — vanilla Elman RNN; interpretable; short sequences
-#   L_PFC_GRU  — GRU; recommended default; fewer params than LSTM
-#   L_PFC_LSTM — LSTM; tuple hidden (h, c); long-range carry-over
+#   rnn_type selects the recurrent cell:
+#     'RNN'  — vanilla Elman RNN; interpretable; short sequences
+#     'GRU'  — recommended default; fewer params than LSTM
+#     'LSTM' — tuple hidden (h, c); long-range carry-over
 #
-#   Key differences vs. EmbeddingRNN:
+#   Copied and adapted from EmbeddingRNN/src/layer.py:
 #   - Explicit params (not cfg dict); consistent with EChipp_SL style.
 #   - forward(a_ECout) → net_pfc (n_ECin,) for direct ECin injection.
 #   - reset() zeroes hidden state at trial start.
@@ -1031,8 +1029,8 @@ class L_ECout(nn.Module):
 #   - Trained with backprop (requires_grad=True by default); orthogonal to CHL layers.
 
 
-class L_PFC_RNN(nn.Module):
-    """Vanilla Elman RNN: ECout → PFC hidden → net input to ECin.
+class L_PFC(nn.Module):
+    """Recurrent PFC: ECout → PFC hidden → net input to ECin.
 
     Parameters
     ----------
@@ -1042,14 +1040,22 @@ class L_PFC_RNN(nn.Module):
         PFC recurrent hidden units.
     n_ECin : int
         Output projection size (= L_ECin.n_units).
+    rnn_type : str
+        One of 'RNN', 'GRU' (default), 'LSTM'.
     """
 
-    def __init__(self, n_ECout: int, n_hidden: int, n_ECin: int):
+    _RNN_CLASSES = {'RNN': nn.RNN, 'GRU': nn.GRU, 'LSTM': nn.LSTM}
+
+    def __init__(self, n_ECout: int, n_hidden: int, n_ECin: int,
+                 rnn_type: str = 'GRU'):
         super().__init__()
+        if rnn_type not in self._RNN_CLASSES:
+            raise ValueError(f"rnn_type must be one of {list(self._RNN_CLASSES)}; got {rnn_type!r}")
+        self.rnn_type  = rnn_type
         self.n_hidden  = n_hidden
-        self.rnn       = nn.RNN(n_ECout, n_hidden, batch_first=True)
+        self.rnn       = self._RNN_CLASSES[rnn_type](n_ECout, n_hidden, batch_first=True)
         self.proj_ecin = nn.Linear(n_hidden, n_ECin)
-        self._hidden: torch.Tensor | None = None
+        self._hidden   = None  # Tensor (RNN/GRU) or tuple (LSTM)
 
     def reset(self) -> None:
         """Zero hidden state. Call once per trial before Q1."""
@@ -1057,86 +1063,16 @@ class L_PFC_RNN(nn.Module):
 
     @property
     def h(self) -> torch.Tensor | None:
-        """Current hidden state (n_hidden,) for n_stable/n_dynamic analysis."""
-        return None if self._hidden is None else self._hidden[0, 0]
+        """Current hidden state h_n (n_hidden,) for n_stable/n_dynamic analysis."""
+        if self._hidden is None:
+            return None
+        # LSTM hidden is (h_n, c_n); RNN/GRU hidden is h_n directly.
+        hn = self._hidden[0] if self.rnn_type == 'LSTM' else self._hidden
+        return hn[0, 0]
 
     def forward(self, a_ECout: torch.Tensor) -> torch.Tensor:
-        """One RNN step. Returns net_pfc to inject into L_ECin.forward()."""
-        x = a_ECout.unsqueeze(0).unsqueeze(0)           # (1, 1, n_ECout)
-        _, self._hidden = self.rnn(x, self._hidden)     # (1, 1, n_hidden)
-        return self.proj_ecin(self._hidden[0, 0])       # (n_ECin,)
-
-
-class L_PFC_GRU(nn.Module):
-    """GRU recurrent PFC: ECout → PFC hidden → net input to ECin.
-
-    Parameters
-    ----------
-    n_ECout : int
-        Input size (ECout activity; = n_items).
-    n_hidden : int
-        PFC recurrent hidden units.
-    n_ECin : int
-        Output projection size (= L_ECin.n_units).
-    """
-
-    def __init__(self, n_ECout: int, n_hidden: int, n_ECin: int):
-        super().__init__()
-        self.n_hidden  = n_hidden
-        self.rnn       = nn.GRU(n_ECout, n_hidden, batch_first=True)
-        self.proj_ecin = nn.Linear(n_hidden, n_ECin)
-        self._hidden: torch.Tensor | None = None
-
-    def reset(self) -> None:
-        """Zero hidden state. Call once per trial before Q1."""
-        self._hidden = None
-
-    @property
-    def h(self) -> torch.Tensor | None:
-        """Current hidden state (n_hidden,) for n_stable/n_dynamic analysis."""
-        return None if self._hidden is None else self._hidden[0, 0]
-
-    def forward(self, a_ECout: torch.Tensor) -> torch.Tensor:
-        """One GRU step. Returns net_pfc to inject into L_ECin.forward()."""
-        x = a_ECout.unsqueeze(0).unsqueeze(0)
+        """One RNN step. Returns net_pfc (n_ECin,) to inject into L_ECin.forward()."""
+        x = a_ECout.unsqueeze(0).unsqueeze(0)        # (1, 1, n_ECout)
         _, self._hidden = self.rnn(x, self._hidden)
-        return self.proj_ecin(self._hidden[0, 0])       # (n_ECin,)
-
-
-class L_PFC_LSTM(nn.Module):
-    """LSTM recurrent PFC: ECout → PFC hidden → net input to ECin.
-
-    hidden is a tuple (h_n, c_n); only h_n is projected to ECin.
-    Use when cross-trial carry-over or long-range dependencies are needed.
-
-    Parameters
-    ----------
-    n_ECout : int
-        Input size (ECout activity; = n_items).
-    n_hidden : int
-        PFC recurrent hidden units.
-    n_ECin : int
-        Output projection size (= L_ECin.n_units).
-    """
-
-    def __init__(self, n_ECout: int, n_hidden: int, n_ECin: int):
-        super().__init__()
-        self.n_hidden  = n_hidden
-        self.rnn       = nn.LSTM(n_ECout, n_hidden, batch_first=True)
-        self.proj_ecin = nn.Linear(n_hidden, n_ECin)
-        self._hidden: tuple[torch.Tensor, torch.Tensor] | None = None
-
-    def reset(self) -> None:
-        """Zero hidden and cell states. Call once per trial before Q1."""
-        self._hidden = None
-
-    @property
-    def h(self) -> torch.Tensor | None:
-        """Current h_n (n_hidden,) for n_stable/n_dynamic analysis (not c_n)."""
-        return None if self._hidden is None else self._hidden[0][0, 0]
-
-    def forward(self, a_ECout: torch.Tensor) -> torch.Tensor:
-        """One LSTM step. Returns net_pfc to inject into L_ECin.forward()."""
-        x = a_ECout.unsqueeze(0).unsqueeze(0)
-        _, self._hidden = self.rnn(x, self._hidden)     # hidden: (h_n, c_n)
-        return self.proj_ecin(self._hidden[0][0, 0])    # h_n[0,0]: (n_ECin,)
+        hn = self._hidden[0] if self.rnn_type == 'LSTM' else self._hidden
+        return self.proj_ecin(hn[0, 0])              # (n_ECin,)

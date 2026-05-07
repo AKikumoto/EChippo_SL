@@ -24,7 +24,7 @@ Usage
     item = env.reset(seed=42)
     current, next_item = env.step()
 
-    dataset = T_CommunityGraphDataset(n_steps=10000, seed=42)
+    dataset = T_CommunityGraphDataset(n_steps=600, seed=42)
     step    = dataset[0]   # dict with item, next_item, community, one-hots
 
 References
@@ -242,7 +242,6 @@ class T_CommunityGraphEnv:
         self,
         n_communities: int = 5,
         items_per_community: int = 3,
-        p_within: float = None,
         seed: Optional[int] = None,
     ):
         """
@@ -252,16 +251,13 @@ class T_CommunityGraphEnv:
             Number of communities. Schapiro (2017) Fig. 1: 5.
         items_per_community : int
             Items per community. Schapiro (2017) Fig. 1: 3.
-        p_within : float, optional
-            Unused — transition probabilities are derived from graph topology
-            (uniform over neighbors). Kept for API compatibility.
         seed : int, optional
             Random seed for reproducibility.
         """
-        self.n_communities      = n_communities
+        self.n_communities       = n_communities
         self.items_per_community = items_per_community
-        self.n_items            = n_communities * items_per_community
-        self.rng                = np.random.default_rng(seed)
+        self.n_items             = n_communities * items_per_community
+        self.rng                 = np.random.default_rng(seed)
 
         # community[i] = community index for item i
         self.community = np.array([
@@ -362,7 +358,7 @@ class T_CommunityGraphEnv:
 #     'target_onehot' : FloatTensor (n_items,) — one-hot for next item (ECout target)
 #
 # [Notes]:
-#   Schapiro (2017) §3.b: 60 inputs/epoch, 10 epochs → n_steps = 600 minimum.
+#   Schapiro (2017) §3.b: 60 inputs/epoch × 10 epochs = 600 → default n_steps=600.
 
 class T_CommunityGraphDataset(Dataset):
     """Pre-generated community graph random walk for CHL training.
@@ -372,10 +368,9 @@ class T_CommunityGraphDataset(Dataset):
 
     def __init__(
         self,
-        n_steps: int = 10000,
+        n_steps: int = 600,
         n_communities: int = 5,
         items_per_community: int = 3,
-        p_within: float = None,
         device: str = "cpu",
         seed: Optional[int] = None,
     ):
@@ -389,8 +384,6 @@ class T_CommunityGraphDataset(Dataset):
             Number of communities. Schapiro (2017) Fig. 1: 5.
         items_per_community : int
             Items per community. Schapiro (2017) Fig. 1: 3.
-        p_within : float, optional
-            Passed through to T_CommunityGraphEnv (unused; see env docstring).
         device : str
             PyTorch device ('cpu' or 'cuda').
         seed : int, optional
@@ -404,20 +397,18 @@ class T_CommunityGraphDataset(Dataset):
         self._next_items : torch.Tensor = None
         self._communities: torch.Tensor = None
 
-        self._generate(n_communities, items_per_community, p_within, seed)
+        self._generate(n_communities, items_per_community, seed)
 
     def _generate(
         self,
         n_communities: int,
         items_per_community: int,
-        p_within: Optional[float],
         seed: Optional[int],
     ) -> None:
         """Run random walk and store all (item, next_item) transitions."""
         env = T_CommunityGraphEnv(
             n_communities=n_communities,
             items_per_community=items_per_community,
-            p_within=p_within,
             seed=seed,
         )
         env.reset()
@@ -467,14 +458,18 @@ class T_CommunityGraphDataset(Dataset):
 
 
 # =========================================================================
-# TASK DESIGN HELPERS
+# TASK DESIGN HELPERS — ECin initialisation utilities
 # =========================================================================
-# Functions for loading task design tables and constructing RSA matrices.
-# Used by T_FeatureEmbedding / T_TaskEmbedding for ECin initialisation.
+# These functions operate on task design tables, NOT on neural responses.
+# They produce *theoretical* RSA model matrices (what cosine similarity
+# between conditions *would be* if the brain perfectly encoded a feature).
 #
-# design_to_units : Task_Design.txt → per-feature one-hot matrices
-# units_to_rsa    : one-hot matrices → per-feature RSA similarity matrices
-# rsa_to_embedding_init : RSA matrix → MDS-style initial embedding weights
+# For neural-response RSA (CA1 activity → correlation with model matrices),
+# use F_rsa_fit in util.py (future implementation).
+#
+# design_to_units       : Task_Design.txt → per-feature one-hot matrices
+# units_to_rsa          : one-hot matrices → theoretical RSA model matrices
+# rsa_to_embedding_init : theoretical RSA matrix → MDS-style ECin init weights
 # =========================================================================
 
 def design_to_units(design: pd.DataFrame) -> Dict[str, np.ndarray]:
@@ -505,7 +500,11 @@ def design_to_units(design: pd.DataFrame) -> Dict[str, np.ndarray]:
 
 
 def units_to_rsa(units: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
-    """Construct per-feature RSA similarity matrices from one-hot encodings.
+    """Construct theoretical RSA model matrices from one-hot feature encodings.
+
+    Each matrix M[i,j] is the cosine similarity between conditions i and j
+    *assuming* the brain perfectly encodes that feature and nothing else.
+    These are design-side model matrices, not measured neural similarities.
 
     For each feature, M[i,j] = dot(oh[i] / sqrt(k), oh[j] / sqrt(k))
     where k = number of units active per condition for that feature.
@@ -529,10 +528,12 @@ def units_to_rsa(units: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
 
 
 def rsa_to_embedding_init(rsa_matrix: np.ndarray, emb_dim: int) -> np.ndarray:
-    """Convert an (n, n) RSA similarity matrix to (n, emb_dim) initial weights.
+    """Convert a theoretical RSA model matrix to (n, emb_dim) ECin init weights.
 
     Eigendecomposition (MDS-style): each row = projection of one condition
     onto the top-emb_dim principal axes of the RSA kernel.
+    Used to initialise T_FeatureEmbedding so that ECin input geometry already
+    reflects the target representational structure at trial onset.
 
     Returns
     -------

@@ -1,37 +1,31 @@
 """
-Schapiro et al. (2017) community graph statistical learning task.
+Schapiro et al. (2017) statistical learning tasks.
 
-Task Design
------------
-Items       : 15 items organized into 5 communities × 3 items each
-Structure   : Community graph — within-community transitions are more frequent
-              than between-community (bottleneck) transitions
-Input       : Current item index → L_ECin one-hot pattern
-Target      : Next item index → L_ECout clamped pattern (plus phase)
-Learning    : CHL (minus phase = prediction; plus phase = correction)
+Tasks
+-----
+Pair structure (§3.a):
+    8 items in 4 fixed pairs (AB, CD, EF, GH); pair order randomized.
+    T_PairEnv / T_PairDataset.
 
-Community Graph
----------------
-Within-community transitions: high probability (items A-B, B-C, A-C)
-Between-community transitions: low probability (only at bottleneck nodes)
-Random walk follows this transition structure during training.
+Community graph (§3.b):
+    15 items in 5 communities × 3 items; random walk on graph.
+    T_CommunityGraphEnv / T_CommunityGraphDataset.
 
-Expected Results (Schapiro 2017)
----------------------------------
-- CA1 representations cluster by community after learning
-- MSP develops graded community structure (overlapping within community)
-- TSP retains distinct episode-level representations
-- Pattern completion: partial cue → CA3 completes → correct CA1 output
+Both tasks produce (item, next_item) pairs for CHL training:
+    item       → ECin clamped pattern (current stimulus)
+    next_item  → ECout clamped pattern (plus-phase teaching signal)
 
 Usage
 -----
-    from src.tasks import CommunityGraphEnv, CommunityGraphDataset
+    from src.tasks import T_CommunityGraphEnv, T_CommunityGraphDataset
+    from src.tasks import T_PairEnv, T_PairDataset
 
-    env = CommunityGraphEnv(n_communities=5, items_per_community=3)
-    item_idx, next_idx = env.reset(seed=42), env.step()
+    env  = T_CommunityGraphEnv(n_communities=5, items_per_community=3)
+    item = env.reset(seed=42)
+    current, next_item = env.step()
 
-    dataset = CommunityGraphDataset(n_steps=10000)
-    step = dataset[0]  # {'item': tensor, 'next_item': tensor, 'community': int}
+    dataset = T_CommunityGraphDataset(n_steps=10000, seed=42)
+    step    = dataset[0]   # dict with item, next_item, community, one-hots
 
 References
 ----------
@@ -43,7 +37,7 @@ Schapiro, A. C., Turk-Browne, N. B., Botvinick, M. M., & Norman, K. A. (2017).
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -51,7 +45,167 @@ from torch.utils.data import Dataset
 
 
 # =========================================================================
-# CommunityGraphEnv: COMMUNITY GRAPH RANDOM WALK ENVIRONMENT
+# T_PairEnv / T_PairDataset: PAIR STRUCTURE TASK
+# =========================================================================
+# [Role]:
+#   Schapiro (2017) §3.a — 4 fixed pairs (AB/CD/EF/GH); each trial presents
+#   the first item as input and the second item as the ECout target.
+#   Pair order is random with no back-to-back repetitions.
+#   80 inputs/epoch (Schapiro 2017 §3.a).
+#
+# [Pair structure]:
+#   Pair 0: items 0, 1  (AB)
+#   Pair 1: items 2, 3  (CD)
+#   Pair 2: items 4, 5  (EF)
+#   Pair 3: items 6, 7  (GH)
+#
+# [Why pairs?]:
+#   In contrast to the community graph, the pair task has no statistical
+#   community structure — only pairwise associations. MSP cannot exploit
+#   higher-order transitional regularities; TSP encodes each pair directly.
+#   Used as a control condition to dissociate MSP from TSP contributions.
+
+class T_PairEnv:
+    """Pair structure environment (Schapiro 2017 §3.a).
+
+    8 items in 4 fixed pairs. Each step returns (A, B) for one pair;
+    pair order is randomized with no back-to-back repetitions.
+    """
+
+    def __init__(self, n_pairs: int = 4, seed: Optional[int] = None):
+        """
+        Parameters
+        ----------
+        n_pairs : int
+            Number of pairs. Schapiro (2017) §3.a: 4 (AB/CD/EF/GH).
+        seed : int, optional
+            Random seed.
+        """
+        self.n_pairs = n_pairs
+        self.n_items = n_pairs * 2
+        # Pair i: items (2i, 2i+1); Schapiro (2017) §3.a: AB/CD/EF/GH
+        self.pairs   = [(2 * i, 2 * i + 1) for i in range(n_pairs)]
+        self.rng     = np.random.default_rng(seed)
+        self._pair_idx = 0
+
+    def reset(self, seed: Optional[int] = None) -> int:
+        """Start at a random pair; return its first item index."""
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
+        self._pair_idx = int(self.rng.integers(self.n_pairs))
+        return self.pairs[self._pair_idx][0]
+
+    def step(self) -> Tuple[int, int]:
+        """Return (A, B) for current pair; advance to a different pair.
+
+        Returns
+        -------
+        current_item : int
+            First item of the pair (input to ECin).
+        next_item : int
+            Second item of the pair (ECout plus-phase target).
+        """
+        pair    = self.pairs[self._pair_idx]
+        current = pair[0]
+        target  = pair[1]
+        # Next pair: exclude current to prevent back-to-back repetition
+        # Schapiro (2017) §3.a: no consecutive same-pair presentations
+        candidates     = [i for i in range(self.n_pairs) if i != self._pair_idx]
+        self._pair_idx = int(self.rng.choice(candidates))
+        return current, target
+
+    @property
+    def current_item(self) -> int:
+        return self.pairs[self._pair_idx][0]
+
+
+class T_PairDataset(Dataset):
+    """Pre-generated pair task sequence for CHL training.
+
+    Schapiro (2017) §3.a: 4 fixed pairs (AB/CD/EF/GH); random pair order.
+    """
+
+    def __init__(
+        self,
+        n_steps: int = 800,
+        n_pairs: int = 4,
+        device: str = "cpu",
+        seed: Optional[int] = None,
+    ):
+        """
+        Parameters
+        ----------
+        n_steps : int
+            Number of transitions to generate.
+            Schapiro (2017) §3.a: 80 inputs/epoch; default 800 = 10 epochs.
+        n_pairs : int
+            Number of pairs. Schapiro (2017) §3.a: 4.
+        device : str
+            PyTorch device.
+        seed : int, optional
+            Random seed.
+        """
+        self.n_steps = n_steps
+        self.n_items = n_pairs * 2
+        self.device  = device
+
+        self._items      : torch.Tensor = None
+        self._next_items : torch.Tensor = None
+        self._pair_labels: torch.Tensor = None
+
+        self._generate(n_pairs, seed)
+
+    def _generate(self, n_pairs: int, seed: Optional[int]) -> None:
+        """Run pair environment and store all (item, next_item) sequences."""
+        env = T_PairEnv(n_pairs=n_pairs, seed=seed)
+        env.reset()
+
+        items, next_items, pair_labels = [], [], []
+        for _ in range(self.n_steps):
+            current, target = env.step()
+            items.append(current)
+            next_items.append(target)
+            pair_labels.append(current // 2)
+
+        self._items       = torch.tensor(items,       dtype=torch.long, device=self.device)
+        self._next_items  = torch.tensor(next_items,  dtype=torch.long, device=self.device)
+        self._pair_labels = torch.tensor(pair_labels, dtype=torch.long, device=self.device)
+
+    def __len__(self) -> int:
+        return self.n_steps
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Return one (item, next_item) pair.
+
+        Returns
+        -------
+        dict with keys:
+          'item'          : LongTensor scalar
+          'next_item'     : LongTensor scalar
+          'pair'          : LongTensor scalar (pair index 0–n_pairs-1)
+          'item_onehot'   : FloatTensor (n_items,)
+          'target_onehot' : FloatTensor (n_items,)
+        """
+        item      = self._items[idx]
+        next_item = self._next_items[idx]
+        pair      = self._pair_labels[idx]
+
+        item_onehot   = torch.zeros(self.n_items, device=self.device)
+        target_onehot = torch.zeros(self.n_items, device=self.device)
+        item_onehot[item]        = 1.0
+        target_onehot[next_item] = 1.0
+
+        return {
+            'item':          item,
+            'next_item':     next_item,
+            'pair':          pair,
+            'item_onehot':   item_onehot,
+            'target_onehot': target_onehot,
+        }
+
+
+# =========================================================================
+# T_CommunityGraphEnv: COMMUNITY GRAPH RANDOM WALK ENVIRONMENT
 # =========================================================================
 # [Role]:
 #   Generates a random walk over the community graph.
@@ -59,29 +213,26 @@ from torch.utils.data import Dataset
 #
 # [Graph structure]:
 #   n_communities communities, each containing items_per_community items.
-#   Within-community transitions: uniform over other items in same community.
-#   Between-community transitions: only at designated bottleneck nodes.
-#   Schapiro (2017) Fig. 1: 15-node graph, 5 communities × 3 items.
+#   Within a community: all items are fully connected (triangle for ipc=3).
+#   Between communities: ring topology — last node of community c connects
+#   to first node of community (c+1) % n_communities (Schapiro 2017 Fig. 1).
+#   Transition probabilities = uniform over neighbors (normalized adjacency).
+#
+# [Node degrees]:
+#   Non-bottleneck nodes (middle of triangle): degree = items_per_community - 1
+#   Bottleneck nodes (endpoints of ring edges): degree = items_per_community
+#   This asymmetry produces natural within-community transition bias.
 #
 # [Training procedure]:
+#   Schapiro (2017) §3.b: 60 inputs/epoch, 10 epochs
 #   1. Start at a random item
 #   2. Sample next_item from transition probabilities
 #   3. Present current_item to ECin (input)
 #   4. Present next_item to ECout (target, plus phase)
 #   5. Run CHL; update weights
 #   6. Move to next_item → repeat
-#
-# [Key parameter]:
-#   p_within : probability of within-community transition at each step.
-#              Schapiro (2017): p_within is high (exact value from original code).
-#              Between-community transition occurs with probability (1 - p_within).
-#
-# [Notes]:
-#   - Schapiro (2017) §2.4: "random walk with higher within-community probability"
-#   - The community structure is what MSP learns over many exposures
-#   - TSP encodes individual transition episodes regardless of structure
 
-class CommunityGraphEnv:
+class T_CommunityGraphEnv:
     """Random walk over the community graph (Schapiro 2017 Fig. 1).
 
     Call reset() to start, then step() repeatedly to get (current, next) pairs.
@@ -102,26 +253,22 @@ class CommunityGraphEnv:
         items_per_community : int
             Items per community. Schapiro (2017) Fig. 1: 3.
         p_within : float, optional
-            Probability of within-community transition. Schapiro (2017): derived
-            from graph structure (all within-community edges equally likely).
-            If None, use the graph's natural transition probabilities.
+            Unused — transition probabilities are derived from graph topology
+            (uniform over neighbors). Kept for API compatibility.
         seed : int, optional
             Random seed for reproducibility.
         """
-        self.n_communities = n_communities
+        self.n_communities      = n_communities
         self.items_per_community = items_per_community
-        self.n_items = n_communities * items_per_community
-        self.p_within = p_within
-        self.rng = np.random.default_rng(seed)
+        self.n_items            = n_communities * items_per_community
+        self.rng                = np.random.default_rng(seed)
 
-        # Community membership: item i belongs to community i // items_per_community
+        # community[i] = community index for item i
         self.community = np.array([
             i // items_per_community for i in range(self.n_items)
         ])
 
-        # Build transition matrix from community graph structure
-        # Schapiro (2017) Fig. 1: specific graph topology with bottleneck nodes
-        self._transition_matrix = None  # built in _build_graph()
+        self._transition_matrix: np.ndarray = None
         self._build_graph()
 
         self._current_item: int = 0
@@ -129,11 +276,35 @@ class CommunityGraphEnv:
     def _build_graph(self) -> None:
         """Build transition probability matrix from community structure.
 
-        Within-community edges are all equal weight.
-        Between-community edges only at bottleneck nodes (one per community pair).
-        Schapiro (2017) Fig. 1: 15-node graph with specific connectivity.
+        Within-community: fully connected (triangle for ipc=3).
+        Schapiro (2017) Fig. 1.
+
+        Between-community (ring): last node of community c ↔ first node of
+        community (c+1) % n_communities. Produces natural bottleneck.
+
+        Transition probabilities = row-normalized adjacency matrix.
         """
-        raise NotImplementedError("Step 6: implement CommunityGraphEnv._build_graph()")
+        ipc = self.items_per_community
+        nc  = self.n_communities
+        A   = np.zeros((self.n_items, self.n_items), dtype=np.float32)
+
+        # Within-community: full triangles (Schapiro 2017 Fig. 1)
+        for c in range(nc):
+            for i in range(ipc):
+                for j in range(i + 1, ipc):
+                    a, b    = c * ipc + i, c * ipc + j
+                    A[a, b] = A[b, a] = 1.0
+
+        # Between-community ring: last of c ↔ first of (c+1)%nc
+        # Schapiro (2017) Fig. 1: bottleneck nodes connect adjacent communities
+        for c in range(nc):
+            last  = c * ipc + (ipc - 1)
+            first = ((c + 1) % nc) * ipc
+            A[last, first] = A[first, last] = 1.0
+
+        # Normalize rows → transition probabilities
+        row_sums = A.sum(axis=1, keepdims=True)
+        self._transition_matrix = A / row_sums
 
     def reset(self, seed: Optional[int] = None) -> int:
         """Reset to a random starting item.
@@ -148,7 +319,10 @@ class CommunityGraphEnv:
         item_idx : int
             Starting item index (0-based).
         """
-        raise NotImplementedError("Step 6: implement CommunityGraphEnv.reset()")
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
+        self._current_item = int(self.rng.integers(self.n_items))
+        return self._current_item
 
     def step(self) -> Tuple[int, int]:
         """Sample one transition: current_item → next_item.
@@ -160,7 +334,11 @@ class CommunityGraphEnv:
         next_item : int
             Index of the next item (target for ECout plus phase).
         """
-        raise NotImplementedError("Step 6: implement CommunityGraphEnv.step()")
+        current   = self._current_item
+        probs     = self._transition_matrix[current]
+        next_item = int(self.rng.choice(self.n_items, p=probs))
+        self._current_item = next_item
+        return current, next_item
 
     @property
     def current_item(self) -> int:
@@ -168,7 +346,7 @@ class CommunityGraphEnv:
 
 
 # =========================================================================
-# CommunityGraphDataset: PYTORCH DATASET WRAPPER
+# T_CommunityGraphDataset: PYTORCH DATASET WRAPPER
 # =========================================================================
 # [Role]:
 #   Pre-generates a sequence of (item, next_item) transitions by running
@@ -183,20 +361,13 @@ class CommunityGraphEnv:
 #     'item_onehot'   : FloatTensor (n_items,) — one-hot for current item
 #     'target_onehot' : FloatTensor (n_items,) — one-hot for next item (ECout target)
 #
-# [Usage]:
-#   dataset = CommunityGraphDataset(n_steps=10000, seed=42)
-#   step = dataset[0]
-#   # step['item'], step['next_item'], step['item_onehot'], step['target_onehot']
-#
 # [Notes]:
-#   - Schapiro (2017) §2.4: model trained for many trials (exact count in paper)
-#   - n_steps should be large enough to expose all transitions many times
-#   - The same dataset can be used for both MSP and TSP learning
+#   Schapiro (2017) §3.b: 60 inputs/epoch, 10 epochs → n_steps = 600 minimum.
 
-class CommunityGraphDataset(Dataset):
+class T_CommunityGraphDataset(Dataset):
     """Pre-generated community graph random walk for CHL training.
 
-    Schapiro (2017) §2.4: training sequence of (current_item, next_item) pairs.
+    Schapiro (2017) §3.b: training sequence of (current_item, next_item) pairs.
     """
 
     def __init__(
@@ -213,13 +384,13 @@ class CommunityGraphDataset(Dataset):
         ----------
         n_steps : int
             Total number of transitions to generate.
-            Schapiro (2017): large enough for convergence (~10k+).
+            Schapiro (2017) §3.b: 60 inputs/epoch × 10 epochs = 600.
         n_communities : int
             Number of communities. Schapiro (2017) Fig. 1: 5.
         items_per_community : int
             Items per community. Schapiro (2017) Fig. 1: 3.
         p_within : float, optional
-            Within-community transition probability. See CommunityGraphEnv.
+            Passed through to T_CommunityGraphEnv (unused; see env docstring).
         device : str
             PyTorch device ('cpu' or 'cuda').
         seed : int, optional
@@ -227,10 +398,10 @@ class CommunityGraphDataset(Dataset):
         """
         self.n_steps = n_steps
         self.n_items = n_communities * items_per_community
-        self.device = device
+        self.device  = device
 
-        self._items: torch.Tensor = None
-        self._next_items: torch.Tensor = None
+        self._items      : torch.Tensor = None
+        self._next_items : torch.Tensor = None
         self._communities: torch.Tensor = None
 
         self._generate(n_communities, items_per_community, p_within, seed)
@@ -243,7 +414,24 @@ class CommunityGraphDataset(Dataset):
         seed: Optional[int],
     ) -> None:
         """Run random walk and store all (item, next_item) transitions."""
-        raise NotImplementedError("Step 6: implement CommunityGraphDataset._generate()")
+        env = T_CommunityGraphEnv(
+            n_communities=n_communities,
+            items_per_community=items_per_community,
+            p_within=p_within,
+            seed=seed,
+        )
+        env.reset()
+
+        items, next_items, communities = [], [], []
+        for _ in range(self.n_steps):
+            current, next_item = env.step()
+            items.append(current)
+            next_items.append(next_item)
+            communities.append(int(env.community[current]))
+
+        self._items       = torch.tensor(items,       dtype=torch.long, device=self.device)
+        self._next_items  = torch.tensor(next_items,  dtype=torch.long, device=self.device)
+        self._communities = torch.tensor(communities, dtype=torch.long, device=self.device)
 
     def __len__(self) -> int:
         return self.n_steps
@@ -260,7 +448,22 @@ class CommunityGraphDataset(Dataset):
           'item_onehot'   : FloatTensor (n_items,)
           'target_onehot' : FloatTensor (n_items,)
         """
-        raise NotImplementedError("Step 6: implement CommunityGraphDataset.__getitem__()")
+        item      = self._items[idx]
+        next_item = self._next_items[idx]
+        community = self._communities[idx]
+
+        item_onehot   = torch.zeros(self.n_items, device=self.device)
+        target_onehot = torch.zeros(self.n_items, device=self.device)
+        item_onehot[item]        = 1.0
+        target_onehot[next_item] = 1.0
+
+        return {
+            'item':          item,
+            'next_item':     next_item,
+            'community':     community,
+            'item_onehot':   item_onehot,
+            'target_onehot': target_onehot,
+        }
 
 
 # =========================================================================

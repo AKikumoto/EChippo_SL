@@ -99,18 +99,31 @@ from util import F_nxx1, F_kWTA
 #
 #   Both cases call the same L_ECin.forward(clamp_pattern).
 #
+# [Why a separate Input layer is NOT needed — Schapiro (2017) §2.a.ii]:
+#   The paper describes a hidden "Input layer" with one-to-one connections to
+#   ECin. In emergent/Leabra, a layer can be either clamped OR driven by
+#   learned weights, but not both simultaneously. The Input layer was the
+#   workaround: Input is clamped to the stimulus; ECin then receives from
+#   Input (weight=1, fixed) plus ECout (W_ECout, learned), so ECin itself
+#   is never clamped and can settle freely.
+#
+#   In PyTorch there is no such constraint. clamp_pattern is simply a tensor
+#   added directly to the net input computation:
+#     net = clamp_pattern + a_ECout @ W_ECout
+#   clamp_pattern acts as the Input layer's output (fixed stimulus signal).
+#   a_ECout @ W_ECout provides the learned ECout back-projection.
+#   No separate module is needed.
+#
 # [Big loop — Schapiro (2017) §2.a.ii]:
-#   ECin can also receive ECout back-projections via net_ecout.
-#   §2.a.ii: "Input was clamped in this layer so as to allow ECin to also
-#   receive input from ECout, completing the 'big loop' of the model."
-#   When net_ecout is supplied, use_euler should be True so ECin settles
-#   rather than snapping to the clamped value.
+#   ECin receives ECout activity via W_ECout (n_ECout, n_units), learned via
+#   CHL at MSP rate. Pass a_ECout to forward(); L_ECin projects it internally.
+#   When a_ECout is supplied, use_euler should be True so ECin settles rather
+#   than snapping. Omit n_ECout (or leave a_ECout=None) to disable the loop.
 #
 # [use_euler flag]:
-#   False (default): _activity = kWTA(net) each cycle. Schapiro behavior —
-#     ECin is fully clamped and does not need to settle.
-#   True: _activity = (1−tau)*_activity + tau*kWTA(net). Required when
-#     ECout back-projection drives ECin dynamics.
+#   False (default): _activity = kWTA(net) each cycle. ECin is effectively
+#     clamped — equivalent to the Input layer driving ECin with weight=1.
+#   True: Euler settling. Required when ECout back-projection modulates ECin.
 #
 # [Inhibition — Schapiro (2017) §2.a.ii]:
 #   k = 2 absolute. For n_items=15: 2/15 ≈ 13% active.
@@ -118,18 +131,24 @@ from util import F_nxx1, F_kWTA
 #   could be active at a time (k = 2), unless otherwise noted."
 #
 # [Learning]:
-#   None. ECin carries no learnable weights.
+#   W_ECout (ECout → ECin, big loop) updated via CHL at lr_MSP = 0.05.
+#   All other ECin weights are fixed (clamp_pattern is not a learned weight).
 
 class L_ECin(nn.Module):
     """Entorhinal cortex input: float activity pattern with optional Euler settling.
 
     Accepts any pre-built float vector (one-hot, feature-coded, or embedded).
     One-hot/moving-window construction belongs at the model level, not here.
+
+    The separate 'Input layer' described in Schapiro (2017) §2.a.ii is not
+    needed in PyTorch: clamp_pattern plays that role directly (see section
+    comment above). W_ECout holds the learned ECout→ECin back-projection.
     """
 
     def __init__(
         self,
         n_units: int,
+        n_ECout: int | None = None,
         k: int = 2,
         tau: float = 0.1,
         use_euler: bool = False,
@@ -141,21 +160,35 @@ class L_ECin(nn.Module):
             Number of ECin units.
             Schapiro community task: 15 (= n_items; Schapiro 2017 Fig. 1).
             K&M feature-coded: 8 (4 rule units + 4 stim units).
+        n_ECout : int or None
+            Number of ECout units. If given, W_ECout (ECout→ECin back-
+            projection) is created and the big loop is enabled.
+            None (default): big loop disabled; a_ECout ignored in forward().
         k : int
             Absolute kWTA count. Schapiro (2017) §2.a.ii: k=2.
         tau : float
             Euler rate. Leabra default: 0.1 (O'Reilly & Munakata 2000).
             Only used when use_euler=True.
         use_euler : bool
-            False: pure clamp — _activity snaps to kWTA(clamp + ecout).
+            False: pure clamp — _activity snaps to kWTA(net) each cycle.
             True: Euler settling — needed when ECout back-projection is active.
         """
         super().__init__()
         self.n_units   = n_units
+        self.n_ECout   = n_ECout
         self.k         = k
         self.tau       = tau
         self.use_euler = use_euler
         self._activity = torch.zeros(n_units)
+
+        # ECout → ECin back-projection (big loop). None when n_ECout not given.
+        # Schapiro (2017) §2.a.ii; learned at MSP rate (lr=0.05).
+        if n_ECout is not None:
+            self.W_ECout = nn.Parameter(
+                torch.zeros(n_ECout, n_units), requires_grad=False
+            )
+        else:
+            self.W_ECout = None
 
     def reset(self):
         """Zero _activity. Call once per trial before Q1."""
@@ -164,25 +197,29 @@ class L_ECin(nn.Module):
     def forward(
         self,
         clamp_pattern: torch.Tensor,
-        net_ecout: torch.Tensor | None = None,
+        a_ECout: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Settle ECin for one cycle.
 
         Parameters
         ----------
         clamp_pattern : FloatTensor (n_units,)
-            External stimulus pattern. Constructed by the caller:
-            Schapiro → one_hot(curr)*1.0 + one_hot(prev)*0.9
-            K&M      → T_TaskEmbedding(cond_idx)
-        net_ecout : FloatTensor (n_units,), optional
-            ECout back-projection net input (big loop).
-            Schapiro (2017) §2.a.ii. Default None (clamp-only mode).
+            External stimulus pattern (plays the role of the emergent Input
+            layer output). Constructed by the caller:
+              Schapiro → one_hot(curr)*1.0 + one_hot(prev)*0.9
+              K&M      → T_TaskEmbedding(cond_idx)
+        a_ECout : FloatTensor (n_ECout,), optional
+            Raw ECout activity. L_ECin projects it via W_ECout internally.
+            Only used when n_ECout was given at construction (big loop).
 
         Returns
         -------
         _activity : FloatTensor (n_units,)
         """
-        net = clamp_pattern if net_ecout is None else clamp_pattern + net_ecout
+        if a_ECout is not None and self.W_ECout is not None:
+            net = clamp_pattern + a_ECout @ self.W_ECout   # (n_ECout,) @ (n_ECout, n_units)
+        else:
+            net = clamp_pattern
 
         # kWTA — absolute k; Schapiro (2017) §2.a.ii
         k_from_bottom = self.n_units - self.k + 1
@@ -196,6 +233,29 @@ class L_ECin(nn.Module):
             self._activity = new_act
 
         return self._activity
+
+    def update_weights(
+        self,
+        a_ECout_minus: torch.Tensor,
+        a_ECout_plus: torch.Tensor,
+        a_ECin_minus: torch.Tensor,
+        a_ECin_plus: torch.Tensor,
+        lr: float = 0.05,
+    ) -> None:
+        """CHL update for W_ECout (ECout→ECin back-projection).
+
+        ΔW = lr * (a_ECin_plus ⊗ a_ECout_plus − a_ECin_minus ⊗ a_ECout_minus)
+        W shape (n_ECout, n_units): outer(a_ECout, a_ECin).
+        O'Reilly & Munakata (2000) Ch. 4 Eq. 4.3; Schapiro (2017) §2.b.
+        lr = 0.05 (MSP rate; Go reimplementation).
+
+        No-op if big loop is disabled (W_ECout is None).
+        """
+        if self.W_ECout is None:
+            return
+        delta_plus  = torch.outer(a_ECout_plus,  a_ECin_plus)
+        delta_minus = torch.outer(a_ECout_minus, a_ECin_minus)
+        self.W_ECout.data += lr * (delta_plus - delta_minus)
 
 
 # =========================================================================

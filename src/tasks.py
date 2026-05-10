@@ -1,5 +1,5 @@
 """
-Schapiro et al. (2017) statistical learning tasks.
+Statistical learning tasks for the EC-hippocampus circuit.
 
 Tasks
 -----
@@ -11,21 +11,36 @@ Community graph (§3.b):
     15 items in 5 communities × 3 items; random walk on graph.
     T_CommunityGraphEnv / T_CommunityGraphDataset.
 
-Both tasks produce (item, next_item) pairs for CHL training:
+Weather Prediction:
+    4 probabilistic cues (A–D); 14 multi-cue patterns; rain/sun outcome.
+    T_WeatherEnv / T_WeatherDataset.
+    Frank, M. J. (2005). Dynamic dopamine modulation in the basal ganglia.
+    J. Cogn. Neurosci., 17(1), 51–72.
+
+Sequence tasks produce (item, next_item) pairs for CHL training:
     item       → ECin clamped pattern (current stimulus)
     next_item  → ECout clamped pattern (plus-phase teaching signal)
+
+Weather task produces (cue_pattern, outcome) for CHL training:
+    cue_pattern → ECin binary vector (n_cues,)
+    outcome     → ECout target (0=sun, 1=rain)
 
 Usage
 -----
     from src.tasks import T_CommunityGraphEnv, T_CommunityGraphDataset
     from src.tasks import T_PairEnv, T_PairDataset
+    from src.tasks import T_WeatherEnv, T_WeatherDataset
 
     env  = T_CommunityGraphEnv(n_communities=5, items_per_community=3)
     item = env.reset(seed=42)
     current, next_item = env.step()
 
-    dataset = T_CommunityGraphDataset(n_steps=600, seed=42)
-    step    = dataset[0]   # dict with item, next_item, community, one-hots
+    env = T_WeatherEnv(seed=42)
+    env.reset()
+    cue_pattern, outcome = env.step()
+
+    dataset = T_WeatherDataset(n_trials=400, seed=42)
+    step    = dataset[0]   # dict with cue_pattern, outcome, p_rain, pattern_idx
 
 References
 ----------
@@ -33,11 +48,16 @@ Schapiro, A. C., Turk-Browne, N. B., Botvinick, M. M., & Norman, K. A. (2017).
     Complementary learning systems within the hippocampus: a neural network
     modelling approach to reconciling episodic memory with statistical learning.
     Phil. Trans. R. Soc. B, 372, 20160049.
+
+Frank, M. J. (2005). Dynamic dopamine modulation in the basal ganglia:
+    a neurocomputational account of cognitive deficits in medicated and
+    nonmedicated Parkinsonism. J. Cogn. Neurosci., 17(1), 51–72.
 """
 
+import itertools
 import numpy as np
 import pandas as pd
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -552,6 +572,219 @@ def rsa_to_embedding_init(rsa_matrix: np.ndarray, emb_dim: int) -> np.ndarray:
     if emb_dim > n:
         W = np.concatenate([W, np.zeros((n, emb_dim - n))], axis=1)
     return W.astype(np.float32)
+
+
+# =========================================================================
+# T_WeatherEnv / T_WeatherDataset: WEATHER PREDICTION TASK
+# =========================================================================
+# [Role]:
+#   Frank (2005) Weather Prediction task. 4 probabilistic cues (A–D) predict
+#   rain or sun. Each trial: one of 14 multi-cue patterns; outcome sampled
+#   stochastically from P(rain | cues) = mean of active cue validities.
+#
+# [Cue validities — Frank (2005) p.62, Fig. 4]:
+#   Cue A: P(rain) = 0.41  (weak)
+#   Cue B: P(rain) = 0.59  (strong)
+#   Cue C: P(rain) = 0.41  (weak)
+#   Cue D: P(rain) = 0.59  (strong)
+#
+# [14 patterns]:
+#   All non-empty subsets of {A, B, C, D} with 1–3 active cues:
+#     size 1: 4 patterns  (A, B, C, D)
+#     size 2: 6 patterns  (AB, AC, AD, BC, BD, CD)
+#     size 3: 4 patterns  (ABC, ABD, ACD, BCD)
+#   Total = C(4,1) + C(4,2) + C(4,3) = 4 + 6 + 4 = 14  ✓
+#   Patterns are sampled uniformly at random each trial.
+#
+# [ECin/ECout mapping]:
+#   cue_pattern → ECin binary vector (n_cues,)
+#   outcome     → ECout target scalar (0=sun, 1=rain)
+#
+# [Why not gymnasium API]:
+#   Gymnasium adds observation_space / action_space / (obs, info) wrapping
+#   that is unused by the CHL training loop. T_* classes keep the same
+#   simple step() convention as T_PairEnv and T_CommunityGraphEnv.
+
+class T_WeatherEnv:
+    """Weather Prediction task environment (Frank 2005 Fig. 4).
+
+    14 multi-cue patterns (all non-empty subsets of n_cues with 1–max_cues
+    active). Each step returns (cue_pattern, outcome); pattern sampled
+    uniformly; outcome sampled from P(rain) = mean active cue validity.
+    """
+
+    def __init__(
+        self,
+        n_cues: int = 4,
+        cue_validities: Optional[np.ndarray] = None,
+        max_cues: int = 3,
+        seed: Optional[int] = None,
+    ):
+        """
+        Parameters
+        ----------
+        n_cues : int
+            Number of cues. Frank (2005): 4 (A–D).
+        cue_validities : ndarray (n_cues,), optional
+            P(rain) for each cue. Default: [0.41, 0.59, 0.41, 0.59]
+            (Frank 2005 p.62 Fig. 4).
+        max_cues : int
+            Maximum number of simultaneously active cues per trial. Default 3.
+            Together with min=1 gives the 14 standard patterns.
+        seed : int, optional
+            Random seed.
+        """
+        self.n_cues = n_cues
+        if cue_validities is None:
+            # Frank (2005) p.62, Fig. 4: weak (0.41) and strong (0.59) cues
+            cue_validities = np.array([0.41, 0.59, 0.41, 0.59])
+        self.cue_validities = np.asarray(cue_validities, dtype=np.float32)
+        self.max_cues = max_cues
+        self.rng = np.random.default_rng(seed)
+
+        # Pre-enumerate all 14 patterns (size 1..max_cues)
+        self.patterns: List[np.ndarray] = self._build_patterns()
+        self.n_patterns = len(self.patterns)
+        self._pattern_idx: int = 0
+
+    def _build_patterns(self) -> List[np.ndarray]:
+        patterns = []
+        for size in range(1, self.max_cues + 1):
+            for combo in itertools.combinations(range(self.n_cues), size):
+                v = np.zeros(self.n_cues, dtype=np.float32)
+                v[list(combo)] = 1.0
+                patterns.append(v)
+        return patterns
+
+    def reset(self, seed: Optional[int] = None) -> np.ndarray:
+        """Sample first trial pattern; return cue_pattern."""
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
+        self._pattern_idx = int(self.rng.integers(self.n_patterns))
+        return self.patterns[self._pattern_idx].copy()
+
+    def step(self) -> Tuple[np.ndarray, int]:
+        """Return (cue_pattern, outcome); advance to next (randomly sampled) trial.
+
+        Returns
+        -------
+        cue_pattern : ndarray (n_cues,)
+            Binary vector of active cues for this trial (ECin input).
+        outcome : int
+            0 = sun, 1 = rain.
+            Sampled from P(rain) = mean(cue_validities[active_cues]).
+        """
+        pattern = self.patterns[self._pattern_idx].copy()
+        active  = np.where(pattern)[0]
+        p_rain  = float(np.mean(self.cue_validities[active]))
+        outcome = int(self.rng.random() < p_rain)
+        self._pattern_idx = int(self.rng.integers(self.n_patterns))
+        return pattern, outcome
+
+    @property
+    def current_pattern(self) -> np.ndarray:
+        return self.patterns[self._pattern_idx].copy()
+
+    @property
+    def pattern_p_rain(self) -> float:
+        """P(rain) for the current pattern."""
+        active = np.where(self.patterns[self._pattern_idx])[0]
+        return float(np.mean(self.cue_validities[active]))
+
+
+class T_WeatherDataset(Dataset):
+    """Pre-generated weather prediction trial sequence.
+
+    Frank (2005): 400 trials total. Each trial: binary cue pattern → outcome.
+    """
+
+    def __init__(
+        self,
+        n_trials: int = 400,
+        n_cues: int = 4,
+        cue_validities: Optional[np.ndarray] = None,
+        max_cues: int = 3,
+        device: str = "cpu",
+        seed: Optional[int] = None,
+    ):
+        """
+        Parameters
+        ----------
+        n_trials : int
+            Number of trials. Frank (2005) Fig. 7: 400 total. Default 400.
+        n_cues : int
+            Number of cues. Frank (2005): 4.
+        cue_validities : ndarray (n_cues,), optional
+            P(rain) per cue. Default: [0.41, 0.59, 0.41, 0.59]
+            (Frank 2005 p.62 Fig. 4).
+        max_cues : int
+            Max active cues per trial. Default 3.
+        device : str
+            PyTorch device.
+        seed : int, optional
+            Random seed.
+        """
+        self.n_trials = n_trials
+        self.n_cues   = n_cues
+        self.device   = device
+        if cue_validities is None:
+            cue_validities = np.array([0.41, 0.59, 0.41, 0.59])
+        self.cue_validities = np.asarray(cue_validities, dtype=np.float32)
+
+        self._generate(cue_validities, max_cues, seed)
+
+    def _generate(
+        self,
+        cue_validities: np.ndarray,
+        max_cues: int,
+        seed: Optional[int],
+    ) -> None:
+        env = T_WeatherEnv(
+            n_cues=self.n_cues,
+            cue_validities=cue_validities,
+            max_cues=max_cues,
+            seed=seed,
+        )
+        env.reset()
+
+        patterns, outcomes, p_rains, pattern_idxs = [], [], [], []
+        for _ in range(self.n_trials):
+            idx = env._pattern_idx
+            pattern, outcome = env.step()
+            active = np.where(pattern)[0]
+            p_rain = float(np.mean(cue_validities[active]))
+            patterns.append(pattern)
+            outcomes.append(outcome)
+            p_rains.append(p_rain)
+            pattern_idxs.append(idx)
+
+        self._cue_patterns  = torch.tensor(
+            np.array(patterns), dtype=torch.float32, device=self.device
+        )
+        self._outcomes      = torch.tensor(outcomes,      dtype=torch.long,  device=self.device)
+        self._p_rains       = torch.tensor(p_rains,       dtype=torch.float32, device=self.device)
+        self._pattern_idxs  = torch.tensor(pattern_idxs, dtype=torch.long,  device=self.device)
+
+    def __len__(self) -> int:
+        return self.n_trials
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Return one trial.
+
+        Returns
+        -------
+        dict with keys:
+          'cue_pattern'  : FloatTensor (n_cues,) — binary active-cue vector (ECin input)
+          'outcome'      : LongTensor scalar      — 0=sun, 1=rain (ECout target)
+          'p_rain'       : FloatTensor scalar     — theoretical P(rain) for this pattern
+          'pattern_idx'  : LongTensor scalar      — pattern index (0–n_patterns-1)
+        """
+        return {
+            'cue_pattern': self._cue_patterns[idx],
+            'outcome':     self._outcomes[idx],
+            'p_rain':      self._p_rains[idx],
+            'pattern_idx': self._pattern_idxs[idx],
+        }
 
 
 # =========================================================================

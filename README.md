@@ -102,7 +102,7 @@ EChipp_SL/
 ├── src/
 │   ├── util.py                   F_nxx1, F_kWTA
 │   ├── layer.py                  L_ECin, L_ECout, L_DG, L_CA3, L_CA1
-│   ├── model.py                  M_HipSL  (not yet)
+│   ├── model.py                  M_Hip  (not yet)
 │   ├── tasks.py                  CommunityGraphEnv, RuleActionEnv
 │   └── z_task_design_tables/     RSA model matrices (RuleAction, CITask, etc.)
 ├── notebook/
@@ -151,10 +151,10 @@ Practice signature: n_stable emerges earlier in the trial. Overnight consolidati
 | 4 | `L_CA3` — attractor dynamics (layer.py) | not started |
 | 5 | `L_CA1` — MSP + TSP convergence (layer.py) | not started |
 | 6 | `CommunityGraphEnv`, `CommunityGraphDataset` (tasks.py) | not started |
-| 7 | `M_HipSL` assembly + CHL training loop (model.py) | not started |
+| 7 | `M_Hip` assembly + CHL training loop (model.py) | not started |
 | 8 | Reproduce Schapiro 2017 results | not started |
 | 9 | `RuleActionEnv`, `RuleActionDataset` — K&M task (tasks.py) | not started |
-| 10 | Train M_HipSL on K&M task; CA1 RSA vs. RSRCONJ | not started |
+| 10 | Train M_Hip on K&M task; CA1 RSA vs. RSRCONJ | not started |
 
 ---
 

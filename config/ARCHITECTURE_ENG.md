@@ -110,7 +110,7 @@ The ECout→ECin weight matrix `W_ECout` lives in `L_ECin` (receiving-layer conv
 ### L_ECin — Entorhinal Cortex Input
 
 - Localist representation: one unit per item (n_items units)
-- **Moving window (Schapiro 2017 §2.c):** ECin receives activity for both the current and previous item. Current item = 1.0 (clamped); previous item = 0.9 (decayed). This temporal asymmetry is the source of directional learning (forward bias). Construction of the moving-window vector is the model's (M_HipSL) responsibility.
+- **Moving window (Schapiro 2017 §2.c):** ECin receives activity for both the current and previous item. Current item = 1.0 (clamped); previous item = 0.9 (decayed). This temporal asymmetry is the source of directional learning (forward bias). Construction of the moving-window vector is the model's (M_Hip) responsibility.
 - **Big loop — ECout→ECin back-projection:** `W_ECout` (n_ECout, n_units) lives in `L_ECin`. `forward(clamp_pattern, a_ECout)` computes `net = clamp_pattern + a_ECout @ W_ECout`. Learned via CHL at lr_MSP = 0.05. Enable by passing `n_ECout` at construction; disabled (None) by default.
 - **No separate Input layer needed in PyTorch** — see §3 Projections table note.
 - Inhibition: k = 2 (absolute; paper §2.a.ii — two units active at a time)
@@ -236,7 +236,7 @@ Three modes determine how weights are trained and which kWTA variant is active.
 All weights are initialized with `requires_grad=False`.
 To switch to backprop mode, the model level calls `param.requires_grad_(True)` directly:
 ```python
-# In M_HipSL, to enable backprop on all weights:
+# In M_Hip, to enable backprop on all weights:
 for p in model.parameters():
     p.requires_grad_(True)
 ```
@@ -288,7 +288,7 @@ Phase switching is achieved by what the training loop passes to `L_CA1.forward()
 - Q2-Q3 (cycles 26–75): `a_ECin = zeros(n_items)` passed to CA1 (CA3-dominant)
 - Q4 (cycles 76–100): all three inputs active; ECout clamped to target
 
-This convention is simpler than a flag: the training loop in `M_HipSL` is responsible for constructing the right zero tensors for each quarter. Layers remain phase-agnostic.
+This convention is simpler than a flag: the training loop in `M_Hip` is responsible for constructing the right zero tensors for each quarter. Layers remain phase-agnostic.
 
 **`theta_oscillation`** (deferred):
 FFFB inhibition conductance oscillates sinusoidally (Singh 2022 Methods):
@@ -417,10 +417,10 @@ self._activity = (1 - self.tau) * self._activity + self.tau * new_act
 | 5 | `L_CA1` (MSP + TSP convergence, Euler) | `src/layer.py` | `notebook/test_layer_CA1.ipynb` | **done** |
 | 5b | `L_PFC` (RNN/GRU/LSTM; ECout→PFC→ECin; K&M extension) | `src/layer.py` | *(no test notebook yet)* | **done** |
 | 6 | `T_PairEnv/Dataset`, `T_CommunityGraphEnv/Dataset`, task viz | `src/tasks.py` | `notebook/test_task_community.ipynb`, `notebook/test_task_pair.ipynb` | **done** |
-| 7 | `M_HipSL` assembly + CHL training loop (theta_discrete convention) | `src/model.py` | `notebook/test_full_model.ipynb` | **next** |
+| 7 | `M_Hip` assembly + CHL training loop (theta_discrete convention) | `src/model.py` | `notebook/test_full_model.ipynb` | **next** |
 | 8 | Reproduce Schapiro 2017 (RSA, pattern completion, community clustering) | notebooks | `notebook/test_full_model.ipynb` | not started |
 | 9 | `RuleActionEnv`, `RuleActionDataset` — K&M task with rate-coded ECin | `src/tasks.py` | `notebook/test_task_km.ipynb` | not started |
-| 10 | Train M_HipSL on K&M task; read out CA1 RSA vs. RSRCONJ matrix | notebooks | `notebook/test_full_model.ipynb` | not started |
+| 10 | Train M_Hip on K&M task; read out CA1 RSA vs. RSRCONJ matrix | notebooks | `notebook/test_full_model.ipynb` | not started |
 
 ---
 
@@ -682,7 +682,7 @@ EChipp_SL/
 │   ├── __init__.py
 │   ├── util.py           F_nxx1, F_kWTA, F_fffb (Step 1)
 │   ├── layer.py          L_ECin, L_ECout, L_DG, L_CA3, L_CA1 (Steps 2–5)
-│   ├── model.py          M_HipSL (Steps 7–8); M_HipSL_SR (Step 9)
+│   ├── model.py          M_Hip (Steps 7–8); M_Hip_SR (Step 9)
 │   └── tasks.py          CommunityGraphEnv, CommunityGraphDataset (Step 6)
 ├── notebook/
 │   ├── test_nxx1.ipynb           Step 1 verification

@@ -307,9 +307,9 @@ self._activity = (1 - self.tau) * self._activity + self.tau * new_act
 | **4** | `L_CA3`（回帰アトラクター、Euler） | `src/layer.py` | `notebook/test_layers.ipynb` | 未着手 |
 | **5** | `L_CA1`（MSP + TSP 収束、Euler） | `src/layer.py` | `notebook/test_layers.ipynb` | 未着手 |
 | **6** | `CommunityGraphEnv`、`CommunityGraphDataset` | `src/tasks.py` | `notebook/test_task.ipynb` | 未着手 |
-| **7** | `M_HipSL` 組み立て + CHL 学習ループ | `src/model.py` | `notebook/test_full_model.ipynb` | 未着手 |
+| **7** | `M_Hip` 組み立て + CHL 学習ループ | `src/model.py` | `notebook/test_full_model.ipynb` | 未着手 |
 | **8** | Schapiro 2017 結果の再現（RSA、パターン補完） | notebooks | `notebook/test_full_model.ipynb` | 未着手 |
-| **9** | `M_HipSL_SR`：SR(t) 拡張 | `src/model.py` | `notebook/test_sr.ipynb` | 未着手 |
+| **9** | `M_Hip_SR`：SR(t) 拡張 | `src/model.py` | `notebook/test_sr.ipynb` | 未着手 |
 | **10** | EfAb 行動指標（n_dynamic/n_stable、べき乗則） | `src/` | `notebook/test_sr.ipynb` | 未着手 |
 
 ---
@@ -333,7 +333,7 @@ EChipp_SL/
 │   ├── __init__.py
 │   ├── util.py       F_nxx1, F_kWTA, F_fffb（ステップ 1）
 │   ├── layer.py      L_ECin, L_ECout, L_DG, L_CA3, L_CA1（ステップ 2–5）
-│   ├── model.py      M_HipSL（ステップ 7–8）；M_HipSL_SR（ステップ 9）
+│   ├── model.py      M_Hip（ステップ 7–8）；M_Hip_SR（ステップ 9）
 │   └── tasks.py      CommunityGraphEnv, CommunityGraphDataset（ステップ 6）
 ├── notebook/
 │   ├── test_nxx1.ipynb           ステップ 1 検証

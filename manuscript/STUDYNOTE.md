@@ -135,7 +135,7 @@ The clamped ECout activity propagates back to CA1 via `W_ECout` in `L_CA1`.
 ### L_ECin.forward()
 
 Returns one-hot (n_items,) float tensor for a given item index.
-Moving window assembly (current=1.0 + prev=0.9) is handled at the model level (M_HipSL),
+Moving window assembly (current=1.0 + prev=0.9) is handled at the model level (M_Hip),
 not inside L_ECin. The layer just produces one-hot patterns on request.
 
 ### L_ECout.forward()
@@ -369,7 +369,7 @@ Understanding check:
 
 ---
 
-## Step 7 — M_HipSL assembly + CHL training loop (src/model.py)
+## Step 7 — M_Hip assembly + CHL training loop (src/model.py)
 
 _Not yet started._
 

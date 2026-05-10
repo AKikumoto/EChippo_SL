@@ -92,9 +92,9 @@ from util import F_nxx1, F_kWTA, F_init_weights, NET_SCALE
 #   Input driver. Settles to an externally supplied float activity pattern.
 #   L_ECin does not construct the pattern — that is the model's job:
 #
-#   Schapiro replication (M_HipSL):
+#   Schapiro replication (M_Hip):
 #     clamp = one_hot(curr)*1.0 + one_hot(prev)*0.9  (moving window §2.c)
-#   K&M task (M_HipSL_KM):
+#   K&M task (M_Hip_KM):
 #     clamp = T_TaskEmbedding(cond_idx)               (feature-coded)
 #
 #   Both cases call the same L_ECin.forward(clamp_pattern).
@@ -1109,7 +1109,7 @@ class L_ECout(nn.Module):
 #   Recurrent PFC module that receives ECout activity each cycle and projects
 #   a net input back to ECin, closing the ECout → PFC → ECin loop.
 #
-#   Injection pattern at model level (M_HipSL_KM):
+#   Injection pattern at model level (M_Hip_KM):
 #       net_pfc       = pfc(a_ECout)
 #       a_ecin        = ecin(clamp, net_pfc=net_pfc)
 #

@@ -88,78 +88,107 @@ from torch.utils.data import Dataset
 class T_PairEnv:
     """Pair structure environment (Schapiro 2017 §3.a).
 
-    Sequential random walk on 8 items (4 pairs: AB, CD, EF, GH).
-    A items (even index) transition deterministically to their B partner.
-    B items (odd index) transition uniformly to the A item of one of the other
-    3 pairs, preventing back-to-back repetition of the same pair.
-    Both A and B items appear as current item (ECin input).
+    Two modes matching Schapiro's with/without statistical learning conditions:
 
-    Schapiro (2017) p.4: "After AB, BC, BE, or BG followed with equal
-    probability; if BC was chosen, the next input would be CD."
+    interleaved=False (default) — sequential walk (with statistical learning):
+        A→B (deterministic), B→A of other 3 pairs (uniform).
+        Both A and B items appear as ECin. Pairs are detected via statistics:
+        P(A→B)=1.0 >> P(B→specific_C)=1/3.
+        Schapiro (2017) p.4: "After AB, BC, BE, or BG followed with equal probability."
+
+    interleaved=True — isolated pair presentation (without statistical learning):
+        Each step returns (A, B) for a randomly selected pair; no B→A links.
+        Only A items appear as ECin. Pairs are directly memorized by TSP.
+        Schapiro (2017) p.4: "AB, CD, EF, and GH all appeared but never BC or FG."
     """
 
-    def __init__(self, n_pairs: int = 4, seed: Optional[int] = None):
-        self.n_pairs = n_pairs
-        self.n_items = n_pairs * 2
+    def __init__(
+        self,
+        n_pairs:     int            = 4,
+        interleaved: bool           = False,
+        seed:        Optional[int]  = None,
+    ):
+        self.n_pairs     = n_pairs
+        self.n_items     = n_pairs * 2
+        self.interleaved = interleaved
         # Pair i: items (2i, 2i+1); Schapiro (2017) §3.a: AB/CD/EF/GH
-        self.pairs    = [(2 * i, 2 * i + 1) for i in range(n_pairs)]
-        self.rng      = np.random.default_rng(seed)
-        self._current = 0
+        self.pairs     = [(2 * i, 2 * i + 1) for i in range(n_pairs)]
+        self.rng       = np.random.default_rng(seed)
+        self._current  = 0   # sequential mode: current item in walk
+        self._pair_idx = 0   # interleaved mode: current pair index
 
     def reset(self, seed: Optional[int] = None) -> int:
-        """Start at a random A item (first of pair); return its index."""
+        """Start at a random position; return the first current item."""
         if seed is not None:
             self.rng = np.random.default_rng(seed)
-        pair_idx      = int(self.rng.integers(self.n_pairs))
-        self._current = self.pairs[pair_idx][0]
-        return self._current
+        pair_idx = int(self.rng.integers(self.n_pairs))
+        if self.interleaved:
+            self._pair_idx = pair_idx
+            return self.pairs[pair_idx][0]
+        else:
+            self._current = self.pairs[pair_idx][0]
+            return self._current
 
     def step(self) -> Tuple[int, int]:
-        """Advance the random walk one step; return (current_item, next_item).
+        """Advance one step; return (current_item, next_item).
 
-        A items (even): next is always the B partner (deterministic).
-        B items (odd):  next is the A item of one of the other 3 pairs (uniform).
-        Own pair excluded from B's choices to prevent back-to-back pair repetition.
-        Schapiro (2017) p.4: "After AB, BC, BE, or BG followed with equal probability."
+        Sequential: A→B (deterministic), B→A_other (uniform, own pair excluded).
+        Interleaved: returns (A, B) for a randomly selected pair; no B→A links.
 
         Returns
         -------
         current_item : int  (input to ECin)
         next_item    : int  (ECout plus-phase target)
         """
+        if self.interleaved:
+            pair    = self.pairs[self._pair_idx]
+            current = pair[0]
+            target  = pair[1]
+            # Next pair: exclude current (no back-to-back same pair)
+            candidates     = [i for i in range(self.n_pairs) if i != self._pair_idx]
+            self._pair_idx = int(self.rng.choice(candidates))
+            return current, target
+
         current  = self._current
         pair_idx = current // 2
-
         if current % 2 == 0:
             # A item → B partner (deterministic)
+            # Schapiro (2017) p.4: items within a pair always occurred in fixed order
             next_item = current + 1
         else:
             # B item → A item of one of the other 3 pairs (uniform)
+            # Schapiro (2017) p.4: "After AB, BC, BE, or BG followed with equal probability"
             other_pairs = [i for i in range(self.n_pairs) if i != pair_idx]
             next_pair   = int(self.rng.choice(other_pairs))
             next_item   = self.pairs[next_pair][0]
-
         self._current = next_item
         return current, next_item
 
     @property
     def current_item(self) -> int:
+        if self.interleaved:
+            return self.pairs[self._pair_idx][0]
         return self._current
 
 
 class T_PairDataset(Dataset):
     """Pre-generated pair task sequence for CHL training.
 
-    Schapiro (2017) §3.a: sequential random walk over 4 pairs (AB/CD/EF/GH).
-    Both A items and B items appear as current item (ECin input).
+    Schapiro (2017) §3.a: 4 fixed pairs (AB/CD/EF/GH).
+
+    interleaved=False (default): sequential walk (with statistical learning).
+        Both A and B items appear as current item (ECin input).
+    interleaved=True: isolated pair presentation (without statistical learning).
+        Only A items appear as current item; pairs are never connected.
     """
 
     def __init__(
         self,
-        n_steps: int = 800,
-        n_pairs: int = 4,
-        device: str = "cpu",
-        seed: Optional[int] = None,
+        n_steps:     int           = 800,
+        n_pairs:     int           = 4,
+        interleaved: bool          = False,
+        device:      str           = "cpu",
+        seed:        Optional[int] = None,
     ):
         """
         Parameters
@@ -169,24 +198,28 @@ class T_PairDataset(Dataset):
             Schapiro (2017) §3.a: 80 inputs/epoch; default 800 = 10 epochs.
         n_pairs : int
             Number of pairs. Schapiro (2017) §3.a: 4.
+        interleaved : bool
+            False (default): sequential walk (with SL).
+            True: isolated pair presentation (without SL).
         device : str
             PyTorch device.
         seed : int, optional
             Random seed.
         """
-        self.n_steps = n_steps
-        self.n_items = n_pairs * 2
-        self.device  = device
+        self.n_steps     = n_steps
+        self.n_items     = n_pairs * 2
+        self.interleaved = interleaved
+        self.device      = device
 
         self._items      : torch.Tensor = None
         self._next_items : torch.Tensor = None
         self._pair_labels: torch.Tensor = None
 
-        self._generate(n_pairs, seed)
+        self._generate(n_pairs, interleaved, seed)
 
-    def _generate(self, n_pairs: int, seed: Optional[int]) -> None:
+    def _generate(self, n_pairs: int, interleaved: bool, seed: Optional[int]) -> None:
         """Run pair environment and store all (item, next_item) sequences."""
-        env = T_PairEnv(n_pairs=n_pairs, seed=seed)
+        env = T_PairEnv(n_pairs=n_pairs, interleaved=interleaved, seed=seed)
         env.reset()
 
         items, next_items, pair_labels = [], [], []

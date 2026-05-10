@@ -85,10 +85,11 @@ def F_nxx1(
 #   Non-top-k units are suppressed to exactly zero.
 #   Active units retain their original (pre-inhibition) values.
 #
-# [Sparsity targets — Schapiro (2017) §2.2]:
-#   DG         : k_frac = 0.01  (~1% active; strong pattern separation)
-#   CA3/CA1    : k_frac = 0.10  (~10% active)
-#   ECout      : k_frac = 0.10
+# [Sparsity targets — Schapiro (2017) SI Table 1]:
+#   DG    : k_frac = 0.01  (~1%  active; strong pattern separation)
+#   CA3   : k_frac = 0.06  (~6%  active)
+#   CA1   : k_frac = 0.25  (~25% active; less sparse than DG/CA3)
+#   ECout : absolute k=2  (matched to ECin)
 #
 # [Tie-breaking]:
 #   torch.topk breaks ties arbitrarily. For equal-valued units exactly at
@@ -128,3 +129,54 @@ def F_kWTA(
 
     mask = (activity >= threshold.unsqueeze(-1)).float()
     return activity * mask
+
+
+# =============================================================================
+# WEIGHT INITIALIZATION — Schapiro (2017) SI Table 2
+# =============================================================================
+# All weight initialization ranges and forward-time scale factors live here.
+# Change a value once to update every projection that uses it.
+
+# Weight initialization ranges per projection type.
+# Schapiro (2017) SI Table 2, "Weight range" column.
+_W_INIT: dict[str, tuple[float, float]] = {
+    'default':     (0.25, 0.75),  # SI Table 2: all projections except the two below
+    'mossy_fiber': (0.89, 0.91),  # SI Table 2: DG → CA3 detonator synapse (narrow high range)
+    'big_loop':    (0.49, 0.51),  # SI Table 2: ECout → ECin back-projection
+}
+
+# Forward-time scale factors (multiplier on net input from a projection).
+# Schapiro (2017) SI Table 2, "Scale (abs/rel)" column, abs value.
+# Applied inside layer forward() so that pathway dominance matches the paper.
+NET_SCALE: dict[str, float] = {
+    'ecin_ca1':   3.0,  # SI Table 2 abs=3: ECin → CA1 (MSP direct path dominates Q1)
+    'ecout_ecin': 2.0,  # SI Table 2 abs=2: ECout → ECin (big loop back-projection)
+}
+
+
+def F_init_weights(
+    shape: tuple,
+    projection: str = 'default',
+    mask: torch.Tensor | None = None,
+) -> nn.Parameter:
+    """Uniform weight initialization per Schapiro (2017) SI Table 2.
+
+    Parameters
+    ----------
+    shape : tuple
+        Weight matrix shape (n_pre, n_post).
+    projection : str
+        Key into _W_INIT. 'default' for most projections.
+    mask : Tensor or None
+        If given, non-connected positions (mask == 0) are zeroed out.
+
+    Returns
+    -------
+    nn.Parameter with requires_grad=False (CHL mode; switch with
+    .requires_grad_(True) at the model level for backprop mode).
+    """
+    lo, hi = _W_INIT[projection]
+    w = torch.empty(shape).uniform_(lo, hi)
+    if mask is not None:
+        w = w * mask
+    return nn.Parameter(w, requires_grad=False)

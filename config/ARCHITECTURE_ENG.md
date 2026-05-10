@@ -86,6 +86,7 @@ TSP's path through DG enforces pattern separation: even similar inputs activate 
 |------|----|------|-------------|---------|
 | ECin | CA1 | Feed-forward | Full (all-to-all) | Yes (MSP) |
 | ECin | DG | Feed-forward | Sparse: each DG unit receives from 25% of ECin | Yes (TSP) |
+| ECin | CA3 | Feed-forward | Sparse: 25% (perforant path direct) | Yes (TSP) |
 | DG | CA3 | Feed-forward | Sparse: 5% (mossy fibre) | Yes (TSP) |
 | CA3 | CA3 | Recurrent | Full (all-to-all) | Yes (TSP) |
 | CA3 | CA1 | Feed-forward | Full (all-to-all) | Yes (TSP) |
@@ -724,11 +725,17 @@ EChipp_SL/
 | nxx1 threshold θ | 0.25 | all | O'Reilly & Munakata (2000) |
 | Euler tau | 0.1 | all stateful | Leabra default |
 | ECin/ECout k (absolute) | 2 | ECin, ECout | Schapiro (2017) §2.a.ii |
-| DG sparsity k_frac | ~0.01 | DG | Schapiro (2017) §2.2 |
-| CA3 sparsity k_frac | ~0.10 | CA3 | Schapiro (2017) |
-| CA1 sparsity k_frac | ~0.10 | CA1 | Schapiro (2017) |
+| DG sparsity k_frac | 0.01 | DG | Schapiro (2017) SI Table 1 |
+| CA3 sparsity k_frac | 0.06 | CA3 | Schapiro (2017) SI Table 1 |
+| CA1 sparsity k_frac | 0.25 | CA1 | Schapiro (2017) SI Table 1 |
 | ECin→DG connectivity | 25% (each DG unit receives from 25% of ECin) | ECin→DG | Schapiro (2017) §2.a.iii |
 | DG→CA3 connectivity | 5% (mossy fibre; sparse) | DG→CA3 | Schapiro (2017) §2.a.iii |
+| ECin→CA3 connectivity | 25% (perforant path direct) | ECin→CA3 | Schapiro (2017) §2.a.iii |
+| Weight init (default) | uniform(0.25, 0.75) | all projections except below | Schapiro (2017) SI Table 2; `util._W_INIT['default']` |
+| Weight init (mossy fiber) | uniform(0.89, 0.91) | DG→CA3 | Schapiro (2017) SI Table 2; `util._W_INIT['mossy_fiber']` |
+| Weight init (big loop) | uniform(0.49, 0.51) | ECout→ECin | Schapiro (2017) SI Table 2; `util._W_INIT['big_loop']` |
+| Forward scale ECin→CA1 | 3.0 (abs) | ECin→CA1 | Schapiro (2017) SI Table 2; `util.NET_SCALE['ecin_ca1']` |
+| Forward scale ECout→ECin | 2.0 (abs) | ECout→ECin | Schapiro (2017) SI Table 2; `util.NET_SCALE['ecout_ecin']` |
 | Previous item activity | 0.9 (decayed) | Input layer | Schapiro (2017) §2.c |
 | MSP learning rate | 0.05 | ECin→CA1 | Go reimplementation |
 | TSP learning rate | 0.4 | ECin→DG, DG→CA3, CA3→CA1 | Go reimplementation |

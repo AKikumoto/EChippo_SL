@@ -467,7 +467,7 @@ class L_DG(nn.Module):
 #   - a_CA3  : (n_CA3,) — previous CA3 activity (recurrent self-connection)
 #
 # [Outputs]:
-#   - activity : (n_CA3,) — ~10% active via kWTA
+#   - activity : (n_CA3,) — ~6% active via kWTA
 #
 # [Sparse feedforward from DG — Schapiro (2017) §2.a.iii]:
 #   DG → CA3: 5% connectivity (mossy fibre pathway).
@@ -484,8 +484,8 @@ class L_DG(nn.Module):
 #   completing the TSP."
 #
 # [Sparsity]:
-#   k_frac ≈ 0.10 (~10% active). Less sparse than DG to allow the overlap
-#   needed for pattern completion (Schapiro 2017; O'Reilly & Munakata 2000).
+#   k_frac ≈ 0.06 (~6% active). Less sparse than DG to allow the overlap
+#   needed for pattern completion (Schapiro 2017 SI Table 1; O'Reilly & Munakata 2000).
 #
 # [Learning — CHL, TSP learning rate]:
 #   Both W_DG_CA3 (feedforward) and W_CA3_CA3 (recurrent) updated via CHL.
@@ -510,7 +510,7 @@ class L_DG(nn.Module):
 #
 # [Parameters]:
 #   n_CA3    : int   (default: 50)
-#   k_frac   : float (default: 0.10; Schapiro 2017)
+#   k_frac   : float (default: 0.06; Schapiro 2017 SI Table 1)
 #   dg_frac  : float (default: 0.05; mossy fibre; Schapiro 2017 §2.a.iii)
 #   tau      : float (default: 0.1; Leabra default)
 #   use_euler: bool  (default: True)
@@ -526,7 +526,7 @@ class L_DG(nn.Module):
 #     each (DG pattern, CA3 response) pair via CHL.
 
 class L_CA3(nn.Module):
-    """CA3 field: pattern completion via recurrent attractor dynamics (~10% active).
+    """CA3 field: pattern completion via recurrent attractor dynamics (~6% active).
 
     Stateful (Euler integration). Call reset() before each trial's minus phase.
     """
@@ -553,7 +553,7 @@ class L_CA3(nn.Module):
         n_CA3 : int
             Number of CA3 units.
         k_frac : float
-            kWTA sparsity. Schapiro (2017): ~0.10.
+            kWTA sparsity. Schapiro (2017) SI Table 1: 0.06.
         dg_frac : float
             Mossy fibre connectivity fraction.
             Schapiro (2017) §2.a.iii: 0.05 (5%).
@@ -646,7 +646,7 @@ class L_CA3(nn.Module):
         else:
             self._Vm = net
 
-        # Firing rate: nxx1 then kWTA (~10% active); Schapiro (2017) §2.a.iii
+        # Firing rate: nxx1 then kWTA (~6% active); Schapiro (2017) §2.a.iii SI Table 1
         self._y = F_kWTA(F_nxx1(self._Vm), k_frac=self.k_frac)
         return self._y
 
@@ -701,7 +701,7 @@ class L_CA3(nn.Module):
 #   - a_ECout : (n_items,) — ECout activity (plus phase only; None in minus phase)
 #
 # [Outputs]:
-#   - activity : (n_CA1,) — ~10% active via kWTA
+#   - activity : (n_CA1,) — ~25% active via kWTA
 #
 # [Net input per phase]:
 #   Q1   (ECin-dominant minus):  net = W_ECin @ a_ECin  [CA3→CA1 inhibited]
@@ -752,7 +752,7 @@ class L_CA3(nn.Module):
 #   n_items  : int   (= n_ECin = n_ECout)
 #   n_CA3    : int   (CA3 output dimension)
 #   n_CA1    : int   (default: 50)
-#   k_frac   : float (default: 0.10; Schapiro 2017 — less inhibition than DG)
+#   k_frac   : float (default: 0.25; Schapiro 2017 SI Table 1)
 #   tau      : float (default: 0.1; Leabra default)
 #   use_euler: bool  (default: True)
 #
@@ -768,7 +768,7 @@ class L_CA3(nn.Module):
 #     TSP makes it sensitive to individual episodes.
 
 class L_CA1(nn.Module):
-    """CA1 field: MSP + TSP convergence (~10% active).
+    """CA1 field: MSP + TSP convergence (~25% active).
 
     Stateful (Euler integration). Call reset() before each trial's minus phase.
     """
@@ -794,7 +794,7 @@ class L_CA1(nn.Module):
         n_CA1 : int
             Number of CA1 units.
         k_frac : float
-            kWTA sparsity. Schapiro (2017): ~0.10 (less than DG; §2.a.iv).
+            kWTA sparsity. Schapiro (2017) SI Table 1: 0.25.
         tau : float
             Euler time constant. Leabra default: 0.1.
         use_euler : bool
@@ -878,7 +878,7 @@ class L_CA1(nn.Module):
         else:
             self._Vm = net
 
-        # Firing rate: nxx1 then kWTA (~10% active); Schapiro (2017) §2.a.iv
+        # Firing rate: nxx1 then kWTA (~25% active); Schapiro (2017) §2.a.iv SI Table 1
         self._y = F_kWTA(F_nxx1(self._Vm), k_frac=self.k_frac)
         return self._y
 

@@ -88,61 +88,70 @@ from torch.utils.data import Dataset
 class T_PairEnv:
     """Pair structure environment (Schapiro 2017 §3.a).
 
-    8 items in 4 fixed pairs. Each step returns (A, B) for one pair;
-    pair order is randomized with no back-to-back repetitions.
+    Sequential random walk on 8 items (4 pairs: AB, CD, EF, GH).
+    A items (even index) transition deterministically to their B partner.
+    B items (odd index) transition uniformly to the A item of one of the other
+    3 pairs, preventing back-to-back repetition of the same pair.
+    Both A and B items appear as current item (ECin input).
+
+    Schapiro (2017) p.4: "After AB, BC, BE, or BG followed with equal
+    probability; if BC was chosen, the next input would be CD."
     """
 
     def __init__(self, n_pairs: int = 4, seed: Optional[int] = None):
-        """
-        Parameters
-        ----------
-        n_pairs : int
-            Number of pairs. Schapiro (2017) §3.a: 4 (AB/CD/EF/GH).
-        seed : int, optional
-            Random seed.
-        """
         self.n_pairs = n_pairs
         self.n_items = n_pairs * 2
         # Pair i: items (2i, 2i+1); Schapiro (2017) §3.a: AB/CD/EF/GH
-        self.pairs   = [(2 * i, 2 * i + 1) for i in range(n_pairs)]
-        self.rng     = np.random.default_rng(seed)
-        self._pair_idx = 0
+        self.pairs    = [(2 * i, 2 * i + 1) for i in range(n_pairs)]
+        self.rng      = np.random.default_rng(seed)
+        self._current = 0
 
     def reset(self, seed: Optional[int] = None) -> int:
-        """Start at a random pair; return its first item index."""
+        """Start at a random A item (first of pair); return its index."""
         if seed is not None:
             self.rng = np.random.default_rng(seed)
-        self._pair_idx = int(self.rng.integers(self.n_pairs))
-        return self.pairs[self._pair_idx][0]
+        pair_idx      = int(self.rng.integers(self.n_pairs))
+        self._current = self.pairs[pair_idx][0]
+        return self._current
 
     def step(self) -> Tuple[int, int]:
-        """Return (A, B) for current pair; advance to a different pair.
+        """Advance the random walk one step; return (current_item, next_item).
+
+        A items (even): next is always the B partner (deterministic).
+        B items (odd):  next is the A item of one of the other 3 pairs (uniform).
+        Own pair excluded from B's choices to prevent back-to-back pair repetition.
+        Schapiro (2017) p.4: "After AB, BC, BE, or BG followed with equal probability."
 
         Returns
         -------
-        current_item : int
-            First item of the pair (input to ECin).
-        next_item : int
-            Second item of the pair (ECout plus-phase target).
+        current_item : int  (input to ECin)
+        next_item    : int  (ECout plus-phase target)
         """
-        pair    = self.pairs[self._pair_idx]
-        current = pair[0]
-        target  = pair[1]
-        # Next pair: exclude current to prevent back-to-back repetition
-        # Schapiro (2017) §3.a: no consecutive same-pair presentations
-        candidates     = [i for i in range(self.n_pairs) if i != self._pair_idx]
-        self._pair_idx = int(self.rng.choice(candidates))
-        return current, target
+        current  = self._current
+        pair_idx = current // 2
+
+        if current % 2 == 0:
+            # A item → B partner (deterministic)
+            next_item = current + 1
+        else:
+            # B item → A item of one of the other 3 pairs (uniform)
+            other_pairs = [i for i in range(self.n_pairs) if i != pair_idx]
+            next_pair   = int(self.rng.choice(other_pairs))
+            next_item   = self.pairs[next_pair][0]
+
+        self._current = next_item
+        return current, next_item
 
     @property
     def current_item(self) -> int:
-        return self.pairs[self._pair_idx][0]
+        return self._current
 
 
 class T_PairDataset(Dataset):
     """Pre-generated pair task sequence for CHL training.
 
-    Schapiro (2017) §3.a: 4 fixed pairs (AB/CD/EF/GH); random pair order.
+    Schapiro (2017) §3.a: sequential random walk over 4 pairs (AB/CD/EF/GH).
+    Both A items and B items appear as current item (ECin input).
     """
 
     def __init__(

@@ -410,17 +410,18 @@ self._activity = (1 - self.tau) * self._activity + self.tau * new_act
 
 | Step | Build | File | Test | Status |
 |------|-------|------|------|--------|
-| 1 | `F_nxx1`, `F_kWTA` activation functions | `src/util.py` | `notebook/test_nxx1.ipynb` | **done** |
+| 1 | `F_nxx1`, `F_kWTA` activation functions | `src/util.py` | `notebook/test_F_nxx1.ipynb` | **done** |
 | 2 | `L_ECin` (+ `W_ECout` big loop), `L_ECout` | `src/layer.py` | *(no separate notebook; covered by layer tests)* | **done** |
-| 3 | `L_DG` (sparse kWTA, pattern separation) | `src/layer.py` | `notebook/test_layer_DG.ipynb` | **done** |
-| 4 | `L_CA3` (recurrent attractor, Euler) | `src/layer.py` | `notebook/test_layer_CA3.ipynb` | **done** |
-| 5 | `L_CA1` (MSP + TSP convergence, Euler) | `src/layer.py` | `notebook/test_layer_CA1.ipynb` | **done** |
+| 3 | `L_DG` (sparse kWTA, pattern separation) | `src/layer.py` | `notebook/test_L_DG.ipynb` | **done** |
+| 4 | `L_CA3` (recurrent attractor, Euler) | `src/layer.py` | `notebook/test_L_CA3.ipynb` | **done** |
+| 5 | `L_CA1` (MSP + TSP convergence, Euler) | `src/layer.py` | `notebook/test_L_CA1.ipynb` | **done** |
 | 5b | `L_PFC` (RNN/GRU/LSTM; ECout→PFC→ECin; K&M extension) | `src/layer.py` | *(no test notebook yet)* | **done** |
-| 6 | `T_PairEnv/Dataset`, `T_CommunityGraphEnv/Dataset`, task viz | `src/tasks.py` | `notebook/test_task_community.ipynb`, `notebook/test_task_pair.ipynb` | **done** |
-| 7 | `M_Hip` assembly + CHL training loop (theta_discrete convention) | `src/model.py` | `notebook/test_full_model.ipynb` | **next** |
-| 8 | Reproduce Schapiro 2017 (RSA, pattern completion, community clustering) | notebooks | `notebook/test_full_model.ipynb` | not started |
-| 9 | `RuleActionEnv`, `RuleActionDataset` — K&M task with rate-coded ECin | `src/tasks.py` | `notebook/test_task_km.ipynb` | not started |
-| 10 | Train M_Hip on K&M task; read out CA1 RSA vs. RSRCONJ matrix | notebooks | `notebook/test_full_model.ipynb` | not started |
+| 6 | `T_PairEnv/Dataset`, `T_CommunityGraphEnv/Dataset`, task viz | `src/tasks.py` | `notebook/test_T_CommunityGraph.ipynb`, `notebook/test_T_PairStructure.ipynb` | **done** |
+| 6b | `T_WeatherEnv/Dataset` — WP task | `src/tasks.py` | `notebook/test_T_WeatherPrediction.ipynb` | **done** |
+| 6c | `T_TaskEmbedding` — K&M task | `src/tasks.py` | `notebook/test_T_RuleAction_4rules.ipynb` | **done** |
+| 7 | `M_Hip` assembly + CHL training loop (theta_discrete convention) | `src/model.py` | `notebook/test_M_Hip.ipynb` | **next** |
+| 8 | Reproduce Schapiro 2017 (RSA, pattern completion, community clustering) | notebooks | `notebook/test_M_Hip.ipynb` | not started |
+| 9 | Train M_Hip on K&M task; read out CA1 RSA vs. RSRCONJ matrix | notebooks | `notebook/test_M_Hip.ipynb` | not started |
 
 ---
 
@@ -685,11 +686,15 @@ EChipp_SL/
 │   ├── model.py          M_Hip (Steps 7–8); M_Hip_SR (Step 9)
 │   └── tasks.py          CommunityGraphEnv, CommunityGraphDataset (Step 6)
 ├── notebook/
-│   ├── test_nxx1.ipynb           Step 1 verification
-│   ├── test_layers.ipynb         Steps 2–5 verification
-│   ├── test_task.ipynb           Step 6 verification
-│   ├── test_full_model.ipynb     Steps 7–8: Schapiro 2017 reproduction
-│   └── test_sr.ipynb             Steps 9–10: SR(t) extension
+│   ├── test_F_nxx1.ipynb              Step 1: activation functions
+│   ├── test_L_DG.ipynb                Step 3: L_DG
+│   ├── test_L_CA3.ipynb               Step 4: L_CA3
+│   ├── test_L_CA1.ipynb               Step 5: L_CA1
+│   ├── test_T_CommunityGraph.ipynb    Step 6: community graph task
+│   ├── test_T_PairStructure.ipynb     Step 6: pair structure task
+│   ├── test_T_WeatherPrediction.ipynb Step 6b: weather prediction task
+│   ├── test_T_RuleAction_4rules.ipynb Step 6c: K&M rule-action task
+│   └── test_M_Hip.ipynb               Steps 7–9: full model
 ├── simulations/
 ├── scripts/
 ├── trained_models/

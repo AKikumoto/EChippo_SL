@@ -354,12 +354,17 @@ MSP must accumulate statistical regularities slowly — fast learning would caus
 ### Community Graph Structure
 
 Items organized into communities with higher within-community transition probability:
-- 15 items total: 5 communities × 3 items each (or configurable)
+- 15 items total: 3 communities × 5 items each (Schapiro 2017 Fig. 3; chance = 5/15 = 0.33)
 - Within-community transitions: high probability
 - Between-community (bottleneck) transitions: low probability
 - Each presentation: one item pair (current → next)
 
-**Training procedure:**
+**M_Hip is task-agnostic.** The community graph, random walk, and trial generation all live in
+`T_CommunityGraphEnv` / `T_CommunityGraphDataset` (tasks.py). M_Hip receives only two tensors
+per trial — `a_ecin` (moving-window ECin pattern) and `a_target` (next item) — and has no
+knowledge of communities, graph structure, or epoch logic.
+
+**Training procedure (handled by task + training loop, not M_Hip):**
 - Random walk through the community graph
 - Each step: present current item as ECin input
 - Target: next item as ECout teaching signal
@@ -420,6 +425,13 @@ self._activity = (1 - self.tau) * self._activity + self.tau * new_act
 | 6b | `T_WeatherEnv/Dataset` — WP task | `src/tasks.py` | `notebook/test_T_WeatherPrediction.ipynb` | **done** |
 | 6c | `T_TaskEmbedding` — K&M task | `src/tasks.py` | `notebook/test_T_RuleAction_4rules.ipynb` | **done** |
 | 7 | `M_Hip` assembly + CHL training loop (theta_discrete convention) | `src/model.py` | `notebook/test_M_Hip.ipynb` | **next** |
+
+**M_Hip design contract:**
+- Task-agnostic: receives only `(a_ecin, a_target)` per trial; no graph, community, or epoch logic inside
+- `run_trial(a_ecin, a_target)` → returns `(act_mid, act_m, act_p)` for all layers
+- `update_weights(acts)` → calls each layer's CHL update with correct lr
+- `reset()` → resets Euler state of all stateful layers
+- Training loop, dataset iteration, and epoch management belong to the task notebook or a separate trainer
 | 8 | Reproduce Schapiro 2017 (RSA, pattern completion, community clustering) | notebooks | `notebook/test_M_Hip.ipynb` | not started |
 | 9 | Train M_Hip on K&M task; read out CA1 RSA vs. RSRCONJ matrix | notebooks | `notebook/test_M_Hip.ipynb` | not started |
 
@@ -745,8 +757,8 @@ EChipp_SL/
 | MSP learning rate | 0.05 | ECin→CA1 | Go reimplementation |
 | TSP learning rate | 0.4 | ECin→DG, DG→CA3, CA3→CA1 | Go reimplementation |
 | n_items | 15 | community task | Schapiro (2017) Fig. 3 |
-| n_communities | 5 | task | Schapiro (2017) Fig. 1 |
-| Items per community | 3 | task | Schapiro (2017) Fig. 1 |
+| n_communities | 3 | task | Schapiro (2017) Fig. 3; chance=0.33 confirms 5 items/community |
+| Items per community | 5 | task | Schapiro (2017) Fig. 3 |
 | Trials per epoch | 60 | community task | Schapiro (2017) §3.b |
 | Training epochs | 10 | community task | Schapiro (2017) §3.b |
 | Q1 settling cycles (minus1) | 25 | all | Go reimplementation |

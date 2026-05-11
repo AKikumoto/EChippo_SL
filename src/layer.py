@@ -811,8 +811,15 @@ class L_CA1(nn.Module):
         self.k_frac = k_frac
         self.tau = tau
         self.use_euler = use_euler
-        self.lr_MSP = lr_MSP   # Schapiro 2017 §2.b Go reimplementation
-        self.lr_TSP = lr_TSP   # Schapiro 2017 §2.b Go reimplementation
+        # Learning rates are per weight matrix, not per CA1 unit.
+        # The same CA1 unit j receives synapses from both ECin (W_ECin[:, j]) and CA3
+        # (W_CA3[:, j]). These are anatomically distinct projections (MSP = ECin Layer III;
+        # TSP = CA3 Schaffer collaterals), so each carries independent plasticity.
+        # MSP slow (0.05): accumulates statistics across many trials → community structure.
+        # TSP fast (0.4):  binds a single episode before it is overwritten → episodic memory.
+        # Schapiro (2017) §2.b; Go reimplementation values.
+        self.lr_MSP = lr_MSP
+        self.lr_TSP = lr_TSP
 
         # MSP: ECin → CA1 (slow; learns statistical regularities)
         # Schapiro (2017) §2.a.iv: "fully connected projections in the MSP"

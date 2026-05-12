@@ -14,3 +14,5 @@ trained_models/*.pth
 CLAUDE.md
 .claude/
 manuscript/*.pdf
+cluster/*/results/
+cluster/*/log/

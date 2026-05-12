@@ -64,8 +64,18 @@ class M_Hip(nn.Module):
             Settling cycles per quarter. Go reimplementation: 25 / 50 / 25.
         """
         super().__init__()
-        self.n_items     = n_items
-        self.n_CA3       = n_CA3
+        self.n_items      = n_items
+        self.n_DG         = n_DG
+        self.n_CA3        = n_CA3
+        self.n_CA1        = n_CA1
+        self.k_frac_DG    = k_frac_DG
+        self.k_frac_CA3   = k_frac_CA3
+        self.k_frac_CA1   = k_frac_CA1
+        self.ecin_frac    = ecin_frac
+        self.dg_frac      = dg_frac
+        self.tau          = tau
+        self.lr_MSP       = lr_MSP
+        self.lr_TSP       = lr_TSP
         self.n_cycles_Q1  = n_cycles_Q1
         self.n_cycles_Q23 = n_cycles_Q23
         self.n_cycles_Q4  = n_cycles_Q4

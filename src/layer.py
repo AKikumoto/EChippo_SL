@@ -221,10 +221,13 @@ class L_ECin(nn.Module):
         else:
             net = clamp_pattern
 
-        # kWTA — absolute k; Schapiro (2017) §2.a.ii
+        # nxx1 then absolute kWTA — Schapiro (2017) §2.a.ii; O'Reilly & Munakata (2000)
+        # nxx1 bounds activity to [0,1]; without it the big-loop NET_SCALE would
+        # pass amplified raw net values through kWTA, inflating CHL updates ~3×.
+        activated = F_nxx1(net)
         k_from_bottom = self.n_units - self.k + 1
-        threshold = torch.kthvalue(net, k_from_bottom).values
-        new_act = net * (net >= threshold).float()
+        threshold = torch.kthvalue(activated, k_from_bottom).values
+        new_act = activated * (activated >= threshold).float()
 
         if self.use_euler:
             # Euler integration; O'Reilly & Munakata (2000) Ch. 2

@@ -424,7 +424,7 @@ self._activity = (1 - self.tau) * self._activity + self.tau * new_act
 | 6 | `T_PairEnv/Dataset`, `T_CommunityGraphEnv/Dataset`, task viz | `src/tasks.py` | `notebook/test_T_CommunityGraph.ipynb`, `notebook/test_T_PairStructure.ipynb` | **done** |
 | 6b | `T_WeatherEnv/Dataset` — WP task | `src/tasks.py` | `notebook/test_T_WeatherPrediction.ipynb` | **done** |
 | 6c | `T_TaskEmbedding` — K&M task | `src/tasks.py` | `notebook/test_T_RuleAction_4rules.ipynb` | **done** |
-| 7 | `M_Hip` assembly + CHL training loop (theta_discrete convention) | `src/model.py` | `notebook/test_M_Hip.ipynb` | **next** |
+| 7 | `M_Hip` assembly + CHL training loop (theta_discrete convention) | `src/model.py` | `notebook/test_M_Hip.ipynb` | **done** |
 
 **M_Hip design contract:**
 - Task-agnostic: receives only `(a_ecin, a_target)` per trial; no graph, community, or epoch logic inside
@@ -432,7 +432,9 @@ self._activity = (1 - self.tau) * self._activity + self.tau * new_act
 - `update_weights(acts)` → calls each layer's CHL update with correct lr
 - `reset()` → resets Euler state of all stateful layers
 - Training loop, dataset iteration, and epoch management belong to the task notebook or a separate trainer
-| 8 | Reproduce Schapiro 2017 (RSA, pattern completion, community clustering) | notebooks | `notebook/test_M_Hip.ipynb` | not started |
+| 7b | `simulate.py` training loop (run_epoch, run_simulation, run_sweep) | `src/simulate.py` | `notebook/test_M_Hip.ipynb` | **done** |
+| 7c | Oscar cluster scripts + sweep configuration | `cluster/Oscar/`, `config/config.py` | *(smoke tested locally)* | **done** |
+| 8 | Reproduce Schapiro 2017 (RSA, pattern completion, community clustering) | notebooks | `notebook/test_M_Hip.ipynb` | **next** |
 | 9 | Train M_Hip on K&M task; read out CA1 RSA vs. RSRCONJ matrix | notebooks | `notebook/test_M_Hip.ipynb` | not started |
 
 ---
@@ -693,28 +695,33 @@ Open question: Can Schapiro's MSP learning mechanism be extended to learn SR(t) 
 EChipp_SL/
 ├── src/
 │   ├── __init__.py
-│   ├── util.py           F_nxx1, F_kWTA, F_fffb (Step 1)
-│   ├── layer.py          L_ECin, L_ECout, L_DG, L_CA3, L_CA1 (Steps 2–5)
-│   ├── model.py          M_Hip (Steps 7–8); M_Hip_SR (Step 9)
-│   └── tasks.py          CommunityGraphEnv, CommunityGraphDataset (Step 6)
+│   ├── util.py           F_nxx1, F_kWTA (Step 1)
+│   ├── layer.py          L_ECin, L_ECout, L_DG, L_CA3, L_CA1, L_PFC (Steps 2–5b)
+│   ├── model.py          M_Hip (Step 7); M_Hip_SR (Step 9, not started)
+│   ├── simulate.py       run_epoch, run_simulation, run_sweep (Step 7b)
+│   └── tasks.py          T_PairEnv/Dataset, T_CommunityGraphEnv/Dataset,
+│                         T_WeatherEnv/Dataset, T_TaskEmbedding (Steps 6–6c)
 ├── notebook/
-│   ├── test_F_nxx1.ipynb              Step 1: activation functions
-│   ├── test_L_DG.ipynb                Step 3: L_DG
-│   ├── test_L_CA3.ipynb               Step 4: L_CA3
-│   ├── test_L_CA1.ipynb               Step 5: L_CA1
-│   ├── test_T_CommunityGraph.ipynb    Step 6: community graph task
-│   ├── test_T_PairStructure.ipynb     Step 6: pair structure task
-│   ├── test_T_WeatherPrediction.ipynb Step 6b: weather prediction task
-│   ├── test_T_RuleAction_4rules.ipynb Step 6c: K&M rule-action task
-│   └── test_M_Hip.ipynb               Steps 7–9: full model
-├── simulations/
+│   ├── test_F_nxx1.ipynb              Step 1
+│   ├── test_L_DG.ipynb                Step 3
+│   ├── test_L_CA3.ipynb               Step 4
+│   ├── test_L_CA1.ipynb               Step 5
+│   ├── test_T_CommunityGraph.ipynb    Step 6
+│   ├── test_T_PairStructure.ipynb     Step 6
+│   ├── test_T_WeatherPrediction.ipynb Step 6b
+│   ├── test_T_RuleAction_4rules.ipynb Step 6c
+│   └── test_M_Hip.ipynb               Steps 7–9
+├── cluster/
+│   └── Oscar/            SLURM scripts for community graph sweep (Step 7c)
+├── config/
+│   ├── ARCHITECTURE_ENG.md   (this file)
+│   ├── ARCHITECTURE.md       Japanese version
+│   ├── config.py             hyperparameter reference + sweep configuration
+│   └── requirements.txt
 ├── scripts/
 ├── trained_models/
 ├── visualizations/
 ├── manuscript/
-├── config/
-│   ├── ARCHITECTURE.md   (this file)
-│   └── requirements.txt
 ├── CLAUDE.md
 └── README.md
 ```

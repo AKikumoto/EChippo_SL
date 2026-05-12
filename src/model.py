@@ -16,7 +16,15 @@ from layer import L_ECin, L_ECout, L_DG, L_CA3, L_CA1
 class M_Hip(nn.Module):
     """Hippocampal circuit: TSP (ECin→DG→CA3→CA1) + MSP (ECin→CA1) + ECout.
 
-    Trial structure — theta_discrete convention (Schapiro 2017 §2.b):
+    Two theta modes (selected at construction via theta_mode):
+      'discrete'    — explicit phase switching; caller passes zero vectors to gate
+                      CA3→CA1 (Q1) or ECin→CA1 (Q2-Q3). Steps 1–8 (current).
+      'oscillation' — sinusoidal FFFB conductance; phase auto-detected (deferred;
+                      requires F_fffb; see ARCHITECTURE_ENG.md §6).
+
+    Both modes return the same (act_mid, act_m, act_p) contract from run_trial().
+
+    theta_discrete trial structure (Schapiro 2017 §2.b):
       Q1      (cycles   1–25): ECin-dominant  (CA3→CA1 zeroed)
       Q2–Q3   (cycles  26–75): CA3-dominant   (ECin→CA1 zeroed)
       Q4      (cycles 76–100): plus phase     (ECout clamped to target)
@@ -42,6 +50,7 @@ class M_Hip(nn.Module):
         n_cycles_Q1: int = 25,
         n_cycles_Q23: int = 50,
         n_cycles_Q4: int = 25,
+        theta_mode: str = 'discrete',
     ):
         """
         Parameters
@@ -79,6 +88,7 @@ class M_Hip(nn.Module):
         self.n_cycles_Q1  = n_cycles_Q1
         self.n_cycles_Q23 = n_cycles_Q23
         self.n_cycles_Q4  = n_cycles_Q4
+        self.theta_mode   = theta_mode
 
         # ECin: kWTA k=2 (Schapiro 2017 §2.a.ii); big loop enabled (n_ECout=n_items)
         self.ecin = L_ECin(n_units=n_items, n_ECout=n_items, tau=tau)
@@ -129,29 +139,39 @@ class M_Hip(nn.Module):
         a_ecin_clamp: torch.Tensor,
         a_target: torch.Tensor,
     ) -> tuple:
-        """Run one CHL trial (Q1 → Q2-Q3 → Q4) and return layer activations.
+        """Dispatch to the active theta mode and return layer activations.
 
-        Parameters
-        ----------
-        a_ecin_clamp : (n_items,)
-            Moving-window ECin pattern built by the caller:
-            current item = 1.0, previous item = 0.9. Schapiro (2017) §2.c.
-        a_target : (n_items,)
-            Next item one-hot; used to clamp ECout in Q4 (plus phase).
+        Both modes share the same output contract:
+            act_mid, act_m, act_p — each a dict with keys 'ecin','dg','ca3','ca1','ecout'
+            act_mid = encoding snapshot (Q1 end)
+            act_m   = minus phase (Q2-Q3 end; free prediction)
+            act_p   = plus phase  (Q4 end; target-corrected)
+        """
+        if self.theta_mode == 'discrete':
+            return self._run_trial_discrete(a_ecin_clamp, a_target)
+        if self.theta_mode == 'oscillation':
+            return self._run_trial_oscillation(a_ecin_clamp, a_target)
+        raise ValueError(
+            f"theta_mode {self.theta_mode!r}: expected 'discrete' or 'oscillation'"
+        )
 
-        Returns
-        -------
-        act_mid : dict  — end of Q1  (cycle 25;  ActMid in Go reimplementation)
-        act_m   : dict  — end of Q2-Q3 (cycle 75;  ActM)
-        act_p   : dict  — end of Q4  (cycle 100; ActP)
-        Each dict has keys: 'ecin', 'dg', 'ca3', 'ca1', 'ecout'.
+    def _run_trial_discrete(
+        self,
+        a_ecin_clamp: torch.Tensor,
+        a_target: torch.Tensor,
+    ) -> tuple:
+        """theta_discrete: explicit phase switching via zero vectors (Schapiro 2017 §2.b).
+
+        Q1 (cycles 1–25)   : zeros_ca3  passed to CA1 → ECin-dominant (theta trough)
+        Q2-Q3 (cycles 26–75): zeros_ecin passed to CA1 → CA3-dominant (theta peak)
+        Q4 (cycles 76–100) : ECout clamped to a_target (plus phase; no reset)
         """
         self.reset()
 
         dev = a_target.device
         zeros_ca3  = torch.zeros(self.n_CA3,  device=dev)
         zeros_ecin = torch.zeros(self.n_items, device=dev)
-        a_ecout    = torch.zeros(self.n_items, device=dev)   # initial ECout for big loop
+        a_ecout    = torch.zeros(self.n_items, device=dev)
 
         # Q1 — ECin-dominant (theta trough; encoding; cycles 1–25)
         # CA3→CA1 zeroed; DG and CA3 still run to build their states.
@@ -187,6 +207,25 @@ class M_Hip(nn.Module):
         act_p = self._snap(a_ecin, a_dg, a_ca3, a_ca1, a_target)
 
         return act_mid, act_m, act_p
+
+    def _run_trial_oscillation(
+        self,
+        a_ecin_clamp: torch.Tensor,
+        a_target: torch.Tensor,
+    ) -> tuple:
+        """theta_oscillation: sinusoidal FFFB conductance; phase auto-detected.
+
+        NOT YET IMPLEMENTED — requires F_fffb in util.py.
+        See ARCHITECTURE_ENG.md §6: Singh et al. (2022) PNAS Methods.
+
+        When implemented, returns the same (act_mid, act_m, act_p) contract as
+        _run_trial_discrete. Phase boundaries detected by activity stability,
+        not by fixed cycle count.
+        """
+        raise NotImplementedError(
+            "theta_oscillation requires F_fffb (sinusoidal FFFB conductance); "
+            "see ARCHITECTURE_ENG.md §6"
+        )
 
     def update_weights(self, act_m: dict, act_p: dict) -> None:
         """CHL weight update for all projections. Call once after run_trial.

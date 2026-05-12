@@ -24,7 +24,7 @@ for _p in (REPO_ROOT, SRC_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from config.sweep_configs import DEFAULT_SWEEP, SMOKE_SWEEP, CONDITIONS
+from config.config import DEFAULT_SWEEP, SMOKE_SWEEP, CONDITIONS
 from simulate import LAYERS, PHASES
 
 RESULTS_DIR = os.path.join(SCRIPT_DIR, 'results')

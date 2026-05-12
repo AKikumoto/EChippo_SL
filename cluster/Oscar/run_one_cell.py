@@ -29,7 +29,7 @@ import torch
 from model import M_Hip
 from simulate import run_simulation
 from tasks import T_CommunityGraphDataset
-from config.sweep_configs import DEFAULT_SWEEP, SMOKE_SWEEP, CONDITIONS
+from config.config import DEFAULT_SWEEP, SMOKE_SWEEP, CONDITIONS
 
 RESULTS_DIR = os.path.join(SCRIPT_DIR, 'results')
 

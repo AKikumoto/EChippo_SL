@@ -228,7 +228,7 @@ def run_simulation(
 
 
 # ---------------------------------------------------------------------------
-# Parallelism (mirrors cartpole_mpc_paper/simulations/simulation.py)
+# Parallelism 
 # ---------------------------------------------------------------------------
 
 def run_sequential(

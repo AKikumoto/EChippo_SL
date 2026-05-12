@@ -32,7 +32,7 @@ N_JOBS=$(python -c "
 import sys
 sys.path.insert(0, '${REPO_ROOT}')
 sys.path.insert(0, '${REPO_ROOT}/src')
-from simulations.sweep_configs import DEFAULT_SWEEP, SMOKE_SWEEP, CONDITIONS
+from config.sweep_configs import DEFAULT_SWEEP, SMOKE_SWEEP, CONDITIONS
 sw = SMOKE_SWEEP if '${SMOKE}' else DEFAULT_SWEEP
 print(len(CONDITIONS) * sw['n_reps'])
 ")

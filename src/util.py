@@ -1,10 +1,19 @@
 """
-Activation functions for the EChipp_SL hippocampal circuit.
+Utility functions for the EChipp_SL hippocampal circuit.
 
-Functions
----------
-F_nxx1  : NoisyXX1 activation (Leabra; O'Reilly & Munakata 2000 Ch. 2)
-F_kWTA  : k-Winners-Take-All inhibition (Schapiro 2017 §2.2)
+Model components (used inside layer.py / model.py)
+---------------------------------------------------
+F_nxx1        : NoisyXX1 activation (Leabra; O'Reilly & Munakata 2000 Ch. 2)
+F_kWTA        : k-Winners-Take-All inhibition (Schapiro 2017 §2.2)
+F_init_weights: uniform weight init per Schapiro (2017) SI Table 2
+NET_SCALE     : forward-pass scale factors per projection
+
+Analysis (used in notebooks and cluster/aggregate.py)
+------------------------------------------------------
+F_item_mean_vecs  : mean CA1 activity per item (normalized)
+F_cosine_sim_mat  : pairwise cosine similarity matrix
+F_community_masks : within- / between-community boolean masks
+F_rsa_by_epoch    : RSA scores across all epochs of a run_simulation result
 
 Notes
 -----
@@ -12,6 +21,7 @@ No DA-dependent gain modulation: gamma and theta are fixed across all layers.
 Unlike BasalGangliaACC, there is no burst/dip modulation in this circuit.
 """
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -180,3 +190,122 @@ def F_init_weights(
     if mask is not None:
         w = w * mask
     return nn.Parameter(w, requires_grad=False)
+
+
+# =============================================================================
+# ANALYSIS FUNCTIONS
+# =============================================================================
+# Used in notebooks and cluster/aggregate.py to evaluate simulation results.
+# These functions operate on run_simulation output (numpy float32 arrays).
+
+
+def F_item_mean_vecs(
+    ca1_acts: np.ndarray,
+    ecin_acts: np.ndarray,
+) -> torch.Tensor:
+    """Mean CA1 activity vector per item, L2-normalized.
+
+    Computes the average CA1 pattern across all trials in which each item
+    was active in ECin, then normalizes each row to unit length.
+    Items with no active trials fall back to the global mean.
+
+    Parameters
+    ----------
+    ca1_acts  : float32 array (n_trials, n_CA1)   — one epoch of CA1 activity
+    ecin_acts : float32 array (n_trials, n_items)  — one epoch of ECin activity
+
+    Returns
+    -------
+    Tensor (n_items, n_CA1), L2-normalized row vectors.
+    """
+    ca1  = torch.as_tensor(ca1_acts)
+    ecin = torch.as_tensor(ecin_acts)
+    n_items = ecin.shape[1]
+
+    vecs = []
+    for i in range(n_items):
+        mask = ecin[:, i] > 0.5
+        vecs.append(ca1[mask].mean(0) if mask.sum() > 0 else ca1.mean(0))
+    mat = torch.stack(vecs)                                # (n_items, n_CA1)
+    return mat / (mat.norm(dim=1, keepdim=True) + 1e-8)   # L2-normalize
+
+
+def F_cosine_sim_mat(item_vecs: torch.Tensor) -> torch.Tensor:
+    """Pairwise cosine similarity matrix from L2-normalized item vectors.
+
+    Parameters
+    ----------
+    item_vecs : Tensor (n_items, n_units), L2-normalized rows
+
+    Returns
+    -------
+    Tensor (n_items, n_items), values in [−1, 1].
+    """
+    return item_vecs @ item_vecs.T
+
+
+def F_community_masks(
+    n_items: int,
+    items_per_community: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Boolean masks for within- and between-community item pairs.
+
+    Assumes equal-sized communities: items 0..k-1 are community 0,
+    items k..2k-1 are community 1, etc.
+
+    Parameters
+    ----------
+    n_items             : total number of items
+    items_per_community : items per community
+
+    Returns
+    -------
+    within_mask  : BoolTensor (n_items, n_items) — within-community, off-diagonal
+    between_mask : BoolTensor (n_items, n_items) — between-community pairs
+    """
+    community   = torch.tensor([i // items_per_community for i in range(n_items)])
+    same_comm   = community.unsqueeze(1) == community.unsqueeze(0)
+    within_mask  = same_comm & ~torch.eye(n_items, dtype=torch.bool)
+    between_mask = ~same_comm
+    return within_mask, between_mask
+
+
+def F_rsa_by_epoch(
+    result: dict,
+    n_items: int,
+    items_per_community: int,
+) -> tuple[list[float], list[float]]:
+    """Within- and between-community RSA scores for every epoch.
+
+    Convenience wrapper around F_item_mean_vecs, F_cosine_sim_mat, and
+    F_community_masks. Operates on run_simulation output.
+
+    Parameters
+    ----------
+    result              : run_simulation output dict
+    n_items             : total number of items
+    items_per_community : items per community
+
+    Returns
+    -------
+    within_scores  : list[float], length n_epochs
+    between_scores : list[float], length n_epochs
+
+    Example
+    -------
+    within, between = F_rsa_by_epoch(result, n_items=15, items_per_community=5)
+    plt.plot(within, label='within')
+    plt.plot(between, label='between')
+    """
+    n_epochs = result['acts']['ca1']['m'].shape[0]
+    within_mask, between_mask = F_community_masks(n_items, items_per_community)
+
+    within_scores, between_scores = [], []
+    for ep in range(n_epochs):
+        vecs    = F_item_mean_vecs(result['acts']['ca1']['m'][ep],
+                                   result['acts']['ecin']['m'][ep])
+        sim_mat = F_cosine_sim_mat(vecs)
+        within_scores.append(sim_mat[within_mask].mean().item())
+        between_scores.append(sim_mat[between_mask].mean().item())
+
+    return within_scores, between_scores

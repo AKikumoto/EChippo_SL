@@ -1,0 +1,9 @@
+# EChipp_SL — notebook environment (conda env "NN", Python 3.11)
+# Install: conda activate NN && pip install -r config/requirements.txt
+
+torch>=2.2.2
+numpy>=1.26.4
+matplotlib>=3.10.0
+seaborn>=0.13.2
+pandas>=2.3.1
+rsatoolbox>=0.3.2

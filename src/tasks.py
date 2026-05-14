@@ -7,6 +7,10 @@ Pair structure (§3.a):
     8 items in 4 fixed pairs (AB, CD, EF, GH); pair order randomized.
     T_PairEnv / T_PairDataset.
 
+Chain / associative inference (§3.c):
+    9 items in 3 triads (ABC/DEF/GHI); trains on A→B and B→C only.
+    T_ChainDataset.
+
 Community graph (§3.b):
     15 items in 5 communities × 3 items; random walk on graph.
     T_CommunityGraphEnv / T_CommunityGraphDataset.
@@ -263,6 +267,84 @@ class T_PairDataset(Dataset):
             'pair':          pair,
             'item_onehot':   item_onehot,
             'target_onehot': target_onehot,
+        }
+
+
+# =========================================================================
+# T_ChainDataset: ASSOCIATIVE INFERENCE (CHAIN) TASK
+# =========================================================================
+# [Role]:
+#   Schapiro (2017) §3.c — 9 items in 3 triads (ABC / DEF / GHI).
+#   Trains on direct pairs only: A→B and B→C for each triad.
+#   Test asks whether the network infers A→C (transitive, two-hop).
+#   Requires CA3 recurrence for transitivity (Fig. 4).
+#
+# [Structure]:
+#   Triad k: items (3k, 3k+1, 3k+2)
+#   Direct pairs: (3k, 3k+1) and (3k+1, 3k+2) for each k
+#   Between-triad connections: none
+#
+# [Relationship to T_PairDataset]:
+#   T_PairDataset: A→B isolated (interleaved) or with statistical walk (sequential)
+#   T_ChainDataset: A→B→C chains; no between-triad transitions; tests inference
+
+class T_ChainDataset(Dataset):
+    """Direct-pair training for associative inference task (Schapiro 2017 §3.c).
+
+    Trains on A→B and B→C pairs within each triad only.
+    Pairs are presented in random interleaved order; no between-triad transitions.
+
+    Parameters
+    ----------
+    n_steps   : int   — number of training transitions (default 60)
+    n_triads  : int   — number of triads (default 3; 9 items total)
+    device    : str
+    seed      : int, optional
+    """
+
+    def __init__(
+        self,
+        n_steps:  int           = 60,
+        n_triads: int           = 3,
+        device:   str           = 'cpu',
+        seed:     Optional[int] = None,
+    ):
+        ipc           = 3                         # items per triad (fixed)
+        self.n_items  = n_triads * ipc
+        self.n_steps  = n_steps
+        self.device   = device
+
+        # Direct pairs: (3k, 3k+1) and (3k+1, 3k+2) for each triad k
+        pairs = [(t * ipc + i, t * ipc + i + 1)
+                 for t in range(n_triads)
+                 for i in range(ipc - 1)]
+
+        rng  = np.random.default_rng(seed)
+        idxs = rng.integers(len(pairs), size=n_steps)
+
+        items      = [pairs[i][0] for i in idxs]
+        next_items = [pairs[i][1] for i in idxs]
+
+        n = self.n_items
+        self._item_oh   = torch.zeros(n_steps, n, device=device)
+        self._target_oh = torch.zeros(n_steps, n, device=device)
+        t_idx = torch.arange(n_steps)
+        self._item_oh  [t_idx, torch.tensor(items)]      = 1.0
+        self._target_oh[t_idx, torch.tensor(next_items)] = 1.0
+
+    def __len__(self) -> int:
+        return self.n_steps
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Return one (item, target) pair.
+
+        Returns
+        -------
+        dict with keys 'item_onehot' (n_items,) and 'target_onehot' (n_items,)
+        """
+        return {
+            'item_onehot':   self._item_oh[idx],
+            'target_onehot': self._target_oh[idx],
         }
 
 

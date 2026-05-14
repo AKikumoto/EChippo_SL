@@ -22,7 +22,7 @@ class M_Hip(nn.Module):
       'oscillation' — sinusoidal FFFB conductance; phase auto-detected (deferred;
                       requires F_fffb; see ARCHITECTURE_ENG.md §6).
 
-    Both modes return the same (act_mid, act_m, act_p) contract from run_trial().
+    Both modes return the same (act_mid, act_m, act_p) contract from run_episode().
 
     theta_discrete trial structure (Schapiro 2017 §2.b):
       Q1      (cycles   1–25): ECin-dominant  (CA3→CA1 zeroed)
@@ -134,7 +134,7 @@ class M_Hip(nn.Module):
     # Public API
     # ------------------------------------------------------------------
 
-    def run_trial(
+    def run_episode(
         self,
         a_ecin_clamp: torch.Tensor,
         a_target: torch.Tensor,
@@ -148,14 +148,14 @@ class M_Hip(nn.Module):
             act_p   = plus phase  (Q4 end; target-corrected)
         """
         if self.theta_mode == 'discrete':
-            return self._run_trial_discrete(a_ecin_clamp, a_target)
+            return self._run_episode_discrete(a_ecin_clamp, a_target)
         if self.theta_mode == 'oscillation':
-            return self._run_trial_oscillation(a_ecin_clamp, a_target)
+            return self._run_episode_oscillation(a_ecin_clamp, a_target)
         raise ValueError(
             f"theta_mode {self.theta_mode!r}: expected 'discrete' or 'oscillation'"
         )
 
-    def _run_trial_discrete(
+    def _run_episode_discrete(
         self,
         a_ecin_clamp: torch.Tensor,
         a_target: torch.Tensor,
@@ -208,7 +208,7 @@ class M_Hip(nn.Module):
 
         return act_mid, act_m, act_p
 
-    def _run_trial_oscillation(
+    def _run_episode_oscillation(
         self,
         a_ecin_clamp: torch.Tensor,
         a_target: torch.Tensor,
@@ -219,7 +219,7 @@ class M_Hip(nn.Module):
         See ARCHITECTURE_ENG.md §6: Singh et al. (2022) PNAS Methods.
 
         When implemented, returns the same (act_mid, act_m, act_p) contract as
-        _run_trial_discrete. Phase boundaries detected by activity stability,
+        _run_episode_discrete. Phase boundaries detected by activity stability,
         not by fixed cycle count.
         """
         raise NotImplementedError(
@@ -228,7 +228,7 @@ class M_Hip(nn.Module):
         )
 
     def update_weights(self, act_m: dict, act_p: dict) -> None:
-        """CHL weight update for all projections. Call once after run_trial.
+        """CHL weight update for all projections. Call once after run_episode.
 
         Uses ActM (end of Q2-Q3) as minus phase and ActP (end of Q4) as plus phase.
         ΔW = lr × (ActP_post ⊗ ActP_pre − ActM_post ⊗ ActM_pre)
@@ -266,3 +266,76 @@ class M_Hip(nn.Module):
             a_CA1_minus=act_m['ca1'],     a_CA1_plus=act_p['ca1'],
             a_ECout_minus=act_m['ecout'], a_ECout_plus=act_p['ecout'],
         )
+
+    def run_evaluation(
+        self,
+        item_idx: int,
+        n_initial: int = 20,
+        n_settled: int = 80,
+    ) -> tuple:
+        """§2.d testing: present one item in isolation; return (initial_snap, settled_snap).
+
+        Schapiro (2017) §2.d: "presented each item individually (no previous item present)
+        and recorded network activity at 20 cycles (initial response) and 80 cycles (settled)."
+
+        Differences from run_episode:
+          - ECin clamp = one-hot only (no moving window; no previous item)
+          - No ECout back-projection (zeros passed to L_ECin)
+          - No phase gating: both MSP (ECin→CA1) and TSP (CA3→CA1) active every cycle
+          - No weight update (evaluation only)
+
+        Parameters
+        ----------
+        item_idx  : int  — item to present (0-based index into ECin)
+        n_initial : int  — cycle at which initial snapshot is taken (default 20)
+        n_settled : int  — total settling cycles (default 80)
+
+        Returns
+        -------
+        initial_snap : dict keys 'ecin','dg','ca3','ca1','ecout'  — snapshot at cycle n_initial
+        settled_snap : dict keys 'ecin','dg','ca3','ca1','ecout'  — snapshot at cycle n_settled
+        """
+        self.ecin.reset()
+        self.reset()                       # resets DG, CA3, CA1, ECout Euler state
+
+        clamp       = torch.zeros(self.n_items)
+        clamp[item_idx] = 1.0
+        zeros_ecout = torch.zeros(self.n_items)  # suppress big-loop back-projection
+
+        initial_snap = None
+        for cycle in range(n_settled):
+            a_ecin  = self.ecin(clamp, zeros_ecout)
+            a_dg    = self.dg(a_ecin)
+            a_ca3   = self.ca3(a_dg, a_ecin)
+            a_ca1   = self.ca1(a_ecin, a_ca3)  # both MSP and TSP; no ECout back-proj
+            a_ecout = self.ecout(a_ca1)
+            if cycle == n_initial - 1:
+                initial_snap = self._snap(a_ecin, a_dg, a_ca3, a_ca1, a_ecout)
+
+        settled_snap = self._snap(a_ecin, a_dg, a_ca3, a_ca1, a_ecout)
+        return initial_snap, settled_snap
+
+    def run_evaluation_all(
+        self,
+        n_initial: int = 20,
+        n_settled: int = 80,
+    ) -> tuple:
+        """Test all n_items via run_evaluation; return stacked activation matrices.
+
+        Returns
+        -------
+        initial_mats : dict[layer] → ndarray float32 (n_items, n_units)
+        settled_mats : dict[layer] → ndarray float32 (n_items, n_units)
+        """
+        import numpy as np
+        layers = ('ecin', 'dg', 'ca3', 'ca1', 'ecout')
+        init_lists = {l: [] for l in layers}
+        sett_lists = {l: [] for l in layers}
+        for i in range(self.n_items):
+            init, sett = self.run_evaluation(i, n_initial, n_settled)
+            for l in layers:
+                init_lists[l].append(init[l].detach().numpy())
+                sett_lists[l].append(sett[l].detach().numpy())
+        initial_mats = {l: np.array(init_lists[l], dtype=np.float32) for l in layers}
+        settled_mats = {l: np.array(sett_lists[l], dtype=np.float32) for l in layers}
+        return initial_mats, settled_mats

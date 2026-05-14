@@ -9,7 +9,7 @@ Reference design: cartpole_mpc_paper/simulations/simulation.py
 Interface contracts
 -------------------
 model
-    .run_trial(a_ecin_clamp, a_target) -> (act_mid, act_m, act_p)
+    .run_episode(a_ecin_clamp, a_target) -> (act_mid, act_m, act_p)
         a_ecin_clamp : (n_items,) tensor — moving-window ECin pattern
         a_target     : (n_items,) tensor — next-item one-hot
         act_*        : dict with keys 'ecin', 'dg', 'ca3', 'ca1', 'ecout'
@@ -125,7 +125,7 @@ def run_epoch(
         target_oh = sample['target_onehot']
         a_ecin    = cur_oh if prev_oh is None else cur_oh + prev_scale * prev_oh
 
-        act_mid, act_m, act_p = model.run_trial(a_ecin, target_oh)
+        act_mid, act_m, act_p = model.run_episode(a_ecin, target_oh)
         if train:
             model.update_weights(act_m, act_p)
 

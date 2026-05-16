@@ -10,8 +10,8 @@ Interface contracts
 -------------------
 model
     .run_episode(a_ecin_clamp, a_target) -> (act_mid, act_m, act_p)
-        a_ecin_clamp : (n_items,) tensor — moving-window ECin pattern
-        a_target     : (n_items,) tensor — next-item one-hot
+        a_ecin_clamp : (n_cond,) tensor — moving-window ECin pattern
+        a_target     : (n_cond,) tensor — next-item one-hot
         act_*        : dict with keys 'ecin', 'dg', 'ca3', 'ca1', 'ecout'
     .update_weights(act_m, act_p) -> None
 
@@ -39,10 +39,15 @@ current item is active (prev_scale contribution is zero).
 Results schema
 --------------
 run_simulation returns a dict:
-    'acts'     : dict[layer][phase] → np.ndarray float32 (n_epochs, n_trials, n_units)
+    'acts'     : dict[layer][phase] → np.ndarray float32
+                 n_reps=1  (backward compat): (n_epochs, n_trials, n_units)
+                 n_reps>1 : (n_reps, n_epochs, n_trials, n_units)
                  layer : 'ecin' | 'dg' | 'ca3' | 'ca1' | 'ecout'
                  phase : 'mid'  | 'm'  | 'p'
-    'metadata' : dict — n_epochs, n_trials, seed, model_kwargs, prev_scale
+    'eval'     : eval_fn outputs (only present when eval_fn is provided)
+                 n_reps=1  : list of n_epochs+1 items; index 0 = pre-training
+                 n_reps>1  : list[n_reps] of list[n_epochs+1]
+    'metadata' : dict — n_epochs, n_trials, n_reps, seed, model_kwargs, prev_scale
 
 run_sweep aggregates over reps:
     sweep[condition_label]['acts'][layer][phase] : float32 (n_reps, n_epochs, n_trials, n_units)
@@ -74,23 +79,13 @@ PHASES = ('mid', 'm', 'p')
 
 def _layer_sizes(model) -> dict:
     return {
-        'ecin':  model.n_items,
-        'dg':    model.n_DG,
-        'ca3':   model.n_CA3,
-        'ca1':   model.n_CA1,
-        'ecout': model.n_items,
+        'ecin':  model.ecin.n_units,
+        'dg':    model.dg.n_units,
+        'ca3':   model.ca3.n_units,
+        'ca1':   model.ca1.n_units,
+        'ecout': model.ecout.n_units,
     }
 
-
-def _empty_acts(n_epochs: int, n_trials: int, layer_sizes: dict) -> dict:
-    """Pre-allocate acts[layer][phase] float32 arrays."""
-    return {
-        layer: {
-            phase: np.empty((n_epochs, n_trials, layer_sizes[layer]), dtype=np.float32)
-            for phase in PHASES
-        }
-        for layer in LAYERS
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +97,7 @@ def run_epoch(
     dataloader: Iterable,
     train: bool = True,
     prev_scale: float = 0.9,
+    post_update_fn: Callable | None = None,
 ) -> list[dict]:
     """Run one epoch over all trials in dataloader.
 
@@ -112,10 +108,11 @@ def run_epoch(
 
     Parameters
     ----------
-    model       : satisfies model interface contract (see module docstring)
-    dataloader  : iterable of dicts with 'item_onehot' and 'target_onehot'
-    train       : if True, call model.update_weights after each trial
-    prev_scale  : activity level of previous item in moving window (0.9)
+    model           : satisfies model interface contract (see module docstring)
+    dataloader      : iterable of dicts with 'item_onehot' and 'target_onehot'
+    train           : if True, call model.update_weights after each trial
+    prev_scale      : activity level of previous item in moving window (0.9)
+    post_update_fn  : callable(model) → None; called after each weight update
     """
     records: list[dict] = []
     prev_oh: torch.Tensor | None = None
@@ -128,6 +125,8 @@ def run_epoch(
         act_mid, act_m, act_p = model.run_episode(a_ecin, target_oh)
         if train:
             model.update_weights(act_m, act_p)
+            if post_update_fn is not None:
+                post_update_fn(model)
 
         records.append({'mid': act_mid, 'm': act_m, 'p': act_p})
         prev_oh = cur_oh
@@ -159,72 +158,132 @@ def stack_records(
 
 
 def run_simulation(
-    model,
+    model_fn: Callable[[], 'torch.nn.Module'],
     dataloader_fn: Callable[[], Iterable],
     n_epochs: int,
+    n_reps: int = 1,
+    eval_fn: Callable | None = None,
+    init_fn: Callable | None = None,
+    post_update_fn: Callable | None = None,
     train: bool = True,
     prev_scale: float = 0.9,
     seed: int | None = None,
     model_kwargs: dict | None = None,
 ) -> dict:
-    """Run n_epochs epochs. Returns structured numpy results dict.
+    """Run n_epochs epochs, optionally over n_reps independent seeds.
 
-    dataloader_fn() is called once per epoch so that tasks with stochastic
-    random walks produce a new trial sequence every epoch (Schapiro 2017 §3).
+    model_fn() is called once per rep to create a fresh model.
+    dataloader_fn() is called once per epoch for a fresh trial sequence.
+
+    If eval_fn is provided it is called n_epochs+1 times per rep:
+      index 0          — before any training (pre-training state)
+      index 1..n_epochs — after each epoch
 
     Parameters
     ----------
-    model          : satisfies model interface contract
-    dataloader_fn  : callable → iterable of trial dicts
-    n_epochs       : number of training epochs
-    train          : if False, run in evaluation mode (no weight updates)
-    prev_scale     : decayed activity of previous item (default 0.9)
-    seed           : RNG seed for reproducibility
-    model_kwargs   : stored in metadata for record-keeping
+    model_fn        : callable → nn.Module; fresh model per rep
+    dataloader_fn   : callable → iterable; fresh trial sequence per epoch
+    n_epochs        : training epochs per rep
+    n_reps          : independent replications (default 1)
+    eval_fn         : callable(model) → any; called n_epochs+1 times per rep
+    init_fn         : callable(model) → None; called once per rep after model_fn()
+    post_update_fn  : callable(model) → None; called after each weight update
+    train           : if False, no weight updates
+    prev_scale      : decayed previous-item activity (default 0.9)
+    seed            : base seed; rep r uses seed+r (None = no seeding)
+    model_kwargs    : stored in metadata only
 
     Returns
     -------
     dict with:
-        'acts'     : acts[layer][phase] float32 (n_epochs, n_trials, n_units)
+        'acts'     : acts[layer][phase] float32 arrays
+                     n_reps=1 (backward compat): (n_epochs, n_trials, n_units)
+                     n_reps>1: (n_reps, n_epochs, n_trials, n_units)
+        'eval'     : eval_fn outputs (only when eval_fn is provided)
+                     n_reps=1: list of n_epochs+1 items, index 0 = pre-training
+                     n_reps>1: list[n_reps] of list[n_epochs+1]
         'metadata' : dict
 
     Example
     -------
-    results = run_simulation(model, dataloader_fn, n_epochs=10)
+    results = run_simulation(lambda: M_Hip(n_cond=15), dl_fn, n_epochs=10, seed=0)
     ca1_m = results['acts']['ca1']['m']   # shape: (10, 60, 50)
     """
-    if seed is not None:
-        torch.manual_seed(seed)
-        np.random.seed(seed)
+    n_trials: int | None = None
+    all_acts: dict | None = None
+    all_evals: list = []
 
-    # Run first epoch to determine n_trials and allocate arrays
-    first_records = run_epoch(model, dataloader_fn(), train=train, prev_scale=prev_scale)
-    n_trials = len(first_records)
-    acts = _empty_acts(n_epochs, n_trials, _layer_sizes(model))
+    for r in range(n_reps):
+        rep_seed = (seed + r) if seed is not None else None
+        if rep_seed is not None:
+            torch.manual_seed(rep_seed)
+            np.random.seed(rep_seed)
 
-    def _write(epoch_idx: int, records: list[dict]) -> None:
-        for t, rec in enumerate(records):
-            for phase in PHASES:
-                for layer in LAYERS:
-                    acts[layer][phase][epoch_idx, t] = (
-                        rec[phase][layer].detach().cpu().numpy()
-                    )
+        model = model_fn()
+        if init_fn is not None:
+            init_fn(model)
 
-    _write(0, first_records)
-    for e in range(1, n_epochs):
-        _write(e, run_epoch(model, dataloader_fn(), train=train, prev_scale=prev_scale))
+        rep_evals: list = []
+        if eval_fn is not None:
+            rep_evals.append(eval_fn(model))  # index 0: pre-training
 
-    return {
+        for e in range(n_epochs):
+            records = run_epoch(
+                model, dataloader_fn(),
+                train=train, prev_scale=prev_scale,
+                post_update_fn=post_update_fn,
+            )
+
+            if n_trials is None:
+                n_trials  = len(records)
+                layer_sz  = _layer_sizes(model)
+                all_acts  = {
+                    layer: {
+                        phase: np.empty(
+                            (n_reps, n_epochs, n_trials, layer_sz[layer]),
+                            dtype=np.float32,
+                        )
+                        for phase in PHASES
+                    }
+                    for layer in LAYERS
+                }
+
+            for t, rec in enumerate(records):
+                for phase in PHASES:
+                    for layer in LAYERS:
+                        all_acts[layer][phase][r, e, t] = (
+                            rec[phase][layer].detach().cpu().numpy()
+                        )
+
+            if eval_fn is not None:
+                rep_evals.append(eval_fn(model))  # index e+1: after epoch e
+
+        all_evals.append(rep_evals)
+
+    # Backward compat: squeeze rep dimension for n_reps=1
+    if n_reps == 1:
+        acts  = {layer: {phase: all_acts[layer][phase][0] for phase in PHASES}
+                 for layer in LAYERS}
+        evals = all_evals[0] if eval_fn is not None else None
+    else:
+        acts  = all_acts
+        evals = all_evals if eval_fn is not None else None
+
+    result: dict = {
         'acts': acts,
         'metadata': {
             'n_epochs':    n_epochs,
             'n_trials':    n_trials,
+            'n_reps':      n_reps,
             'train':       train,
             'prev_scale':  prev_scale,
             'seed':        seed,
             'model_kwargs': model_kwargs or {},
         },
     }
+    if eval_fn is not None:
+        result['eval'] = evals
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -337,19 +396,15 @@ def _run_condition_worker(cfg: dict) -> dict:
 
     from model import M_Hip
 
-    torch.manual_seed(cfg['seed'])
-    np.random.seed(cfg['seed'])
-
-    model  = M_Hip(**cfg['model_kwargs'])
-    dl_fn  = cfg['dataloader_fn']
-
+    model_kwargs = cfg['model_kwargs']
     result = run_simulation(
-        model, dl_fn,
+        lambda: M_Hip(**model_kwargs),
+        cfg['dataloader_fn'],
         n_epochs=cfg['n_epochs'],
         train=cfg['train'],
         prev_scale=cfg['prev_scale'],
         seed=cfg['seed'],
-        model_kwargs=cfg['model_kwargs'],
+        model_kwargs=model_kwargs,
     )
     result['condition'] = cfg['condition_label']
     result['rep']       = cfg['rep']

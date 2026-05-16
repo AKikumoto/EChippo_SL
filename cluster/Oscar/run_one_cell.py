@@ -63,8 +63,8 @@ def main():
     torch.manual_seed(rep)
     np.random.seed(rep)
 
-    n_items      = sw['n_communities'] * sw['items_per_community']
-    model_kwargs = {'n_items': n_items, **cond['model_kwargs']}
+    n_cond       = sw['n_communities'] * sw['items_per_community']
+    model_kwargs = {'n_cond': n_cond, **cond['model_kwargs']}
     model        = M_Hip(**model_kwargs)
 
     # dataloader_fn called once per epoch → fresh random walk each epoch

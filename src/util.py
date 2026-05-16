@@ -10,10 +10,12 @@ NET_SCALE     : forward-pass scale factors per projection
 
 Analysis (used in notebooks and cluster/aggregate.py)
 ------------------------------------------------------
-F_item_mean_vecs  : mean CA1 activity per item (normalized)
-F_cosine_sim_mat  : pairwise cosine similarity matrix
-F_community_masks : within- / between-community boolean masks
-F_rsa_by_epoch    : RSA scores across all epochs of a run_simulation result
+F_item_mean_vecs      : mean CA1 activity per item (normalized)
+F_community_masks     : within- / between-community boolean masks
+F_rsa_by_epoch        : RSA scores across all epochs of a run_simulation result
+F_pearson_sim_mat     : pairwise Pearson r similarity matrix (Schapiro 2017 Figs 2–4)
+F_extract_rsa         : stack Pearson r matrices across reps for a chosen snapshot
+F_pattern_sim_by_mask : mean ± SE Pearson r per layer per boolean mask, across reps
 
 Notes
 -----
@@ -21,7 +23,10 @@ No DA-dependent gain modulation: gamma and theta are fixed across all layers.
 Unlike BasalGangliaACC, there is no burst/dip modulation in this circuit.
 """
 
+from collections.abc import Callable
+
 import numpy as np
+import rsatoolbox
 import torch
 import torch.nn as nn
 
@@ -230,19 +235,6 @@ def F_item_mean_vecs(
     return mat / (mat.norm(dim=1, keepdim=True) + 1e-8)   # L2-normalize
 
 
-def F_cosine_sim_mat(item_vecs: torch.Tensor) -> torch.Tensor:
-    """Pairwise cosine similarity matrix from L2-normalized item vectors.
-
-    Parameters
-    ----------
-    item_vecs : Tensor (n_items, n_units), L2-normalized rows
-
-    Returns
-    -------
-    Tensor (n_items, n_items), values in [−1, 1].
-    """
-    return item_vecs @ item_vecs.T
-
 
 def F_community_masks(
     n_items: int,
@@ -277,8 +269,8 @@ def F_rsa_by_epoch(
 ) -> tuple[list[float], list[float]]:
     """Within- and between-community RSA scores for every epoch.
 
-    Convenience wrapper around F_item_mean_vecs, F_cosine_sim_mat, and
-    F_community_masks. Operates on run_simulation output.
+    Convenience wrapper around F_item_mean_vecs and F_community_masks.
+    Operates on run_simulation output.
 
     Parameters
     ----------
@@ -304,8 +296,89 @@ def F_rsa_by_epoch(
     for ep in range(n_epochs):
         vecs    = F_item_mean_vecs(result['acts']['ca1']['m'][ep],
                                    result['acts']['ecin']['m'][ep])
-        sim_mat = F_cosine_sim_mat(vecs)
+        sim_mat = vecs @ vecs.T
         within_scores.append(sim_mat[within_mask].mean().item())
         between_scores.append(sim_mat[between_mask].mean().item())
 
     return within_scores, between_scores
+
+
+def F_pearson_sim_mat(acts: np.ndarray) -> np.ndarray:
+    """Pairwise Pearson r similarity matrix — Schapiro (2017) Figs 2–4.
+
+    Parameters
+    ----------
+    acts : ndarray (n_items, n_units)
+
+    Returns
+    -------
+    ndarray (n_items, n_items), values in [−1, 1].
+    """
+    rdm = rsatoolbox.rdm.calc_rdm(
+        rsatoolbox.data.Dataset(acts.astype(np.float64)),
+        method='correlation',
+    )
+    return 1.0 - rdm.get_matrices()[0]
+
+
+def F_extract_rsa(
+    results: dict,
+    snap_fn: Callable,
+    layers: tuple = ('dg', 'ca3', 'ca1'),
+) -> dict:
+    """Pearson r RSA matrices per layer, stacked across reps.
+
+    Parameters
+    ----------
+    results  : run_simulation output dict
+    snap_fn  : callable — takes results['eval'][r] (list of epoch evals) and
+               returns a layer-keyed dict of activity arrays (n_items, n_units).
+               Examples:
+                 lambda e: e[-1]       final epoch, settled representations
+                 lambda e: e[0][0]     pre-training snap20
+                 lambda e: e[-1][1]    post-training snap80
+    layers   : tuple of layer names (default: ('dg', 'ca3', 'ca1'))
+
+    Returns
+    -------
+    dict[layer] → ndarray (n_reps, n_items, n_items)
+    """
+    n_reps = results['metadata']['n_reps']
+    # normalize: n_reps=1 backward-compat squeezes the rep dimension
+    evals = [results['eval']] if n_reps == 1 else results['eval']
+    return {
+        l: np.stack([F_pearson_sim_mat(snap_fn(evals[r])[l]) for r in range(n_reps)])
+        for l in layers
+    }
+
+
+def F_pattern_sim_by_mask(
+    rsa_dict: dict,
+    masks: dict,
+) -> dict:
+    """Mean ± SE Pearson r per layer per boolean mask, across reps.
+
+    Parameters
+    ----------
+    rsa_dict : dict[layer] → ndarray (n_reps, n_items, n_items)
+    masks    : dict[name]  → bool ndarray (n_items, n_items)
+
+    Returns
+    -------
+    dict[layer][name] → (mean: float, se: float)
+
+    Example
+    -------
+    sim = F_pattern_sim_by_mask(rsa, {'same': same_mask, 'cross': cross_mask})
+    print(sim['ca1']['same'])   # (mean, se) across reps
+    """
+    result: dict = {}
+    for layer, rsas in rsa_dict.items():
+        result[layer] = {}
+        for name, mask in masks.items():
+            vals = rsas[:, mask].mean(axis=1)   # (n_reps,)
+            result[layer][name] = (
+                float(vals.mean()),
+                float(vals.std() / len(vals) ** 0.5),
+            )
+    return result

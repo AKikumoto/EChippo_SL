@@ -35,7 +35,7 @@ class M_Hip(nn.Module):
 
     def __init__(
         self,
-        n_items: int,
+        n_cond: int,
         n_DG: int = 100,
         n_CA3: int = 50,
         n_CA1: int = 50,
@@ -55,8 +55,9 @@ class M_Hip(nn.Module):
         """
         Parameters
         ----------
-        n_items : int
-            ECin / ECout dimension (15 for community-graph task; Schapiro 2017 Fig. 3).
+        n_cond : int
+            ECin / ECout dimension — number of conditions / items.
+            15 for the community-graph task (Schapiro 2017 Fig. 3).
         n_DG, n_CA3, n_CA1 : int
             Layer sizes. Schapiro (2017) SI Table 1 defaults.
         k_frac_DG, k_frac_CA3, k_frac_CA1 : float
@@ -73,10 +74,7 @@ class M_Hip(nn.Module):
             Settling cycles per quarter. Go reimplementation: 25 / 50 / 25.
         """
         super().__init__()
-        self.n_items      = n_items
-        self.n_DG         = n_DG
-        self.n_CA3        = n_CA3
-        self.n_CA1        = n_CA1
+        self.n_cond       = n_cond
         self.k_frac_DG    = k_frac_DG
         self.k_frac_CA3   = k_frac_CA3
         self.k_frac_CA1   = k_frac_CA1
@@ -90,23 +88,23 @@ class M_Hip(nn.Module):
         self.n_cycles_Q4  = n_cycles_Q4
         self.theta_mode   = theta_mode
 
-        # ECin: kWTA k=2 (Schapiro 2017 §2.a.ii); big loop enabled (n_ECout=n_items)
-        self.ecin = L_ECin(n_units=n_items, n_ECout=n_items, tau=tau)
+        # ECin: kWTA k=2 (Schapiro 2017 §2.a.ii); big loop enabled (n_ECout=n_cond)
+        self.ecin = L_ECin(n_units=n_cond, n_ECout=n_cond, tau=tau)
 
         # TSP layers
-        self.dg  = L_DG(n_input=n_items, n_DG=n_DG, k_frac=k_frac_DG,
+        self.dg  = L_DG(n_input=n_cond, n_units=n_DG, k_frac=k_frac_DG,
                         ecin_frac=ecin_frac, tau=tau, lr=lr_TSP)
-        self.ca3 = L_CA3(n_DG=n_DG, n_ECin=n_items, n_CA3=n_CA3,
+        self.ca3 = L_CA3(n_DG=n_DG, n_ECin=n_cond, n_units=n_CA3,
                          k_frac=k_frac_CA3, dg_frac=dg_frac,
                          ecin_frac=ecin_frac, tau=tau, lr=lr_TSP)
 
         # CA1: MSP (lr_MSP) + TSP (lr_TSP) convergence
-        self.ca1 = L_CA1(n_items=n_items, n_CA3=n_CA3, n_CA1=n_CA1,
+        self.ca1 = L_CA1(n_ecin=n_cond, n_CA3=n_CA3, n_units=n_CA1,
                          k_frac=k_frac_CA1, tau=tau,
                          lr_MSP=lr_MSP, lr_TSP=lr_TSP)
 
         # ECout: reconstruction + plus-phase teaching signal (lr_MSP)
-        self.ecout = L_ECout(n_CA1=n_CA1, n_items=n_items, tau=tau, lr=lr_MSP)
+        self.ecout = L_ECout(n_CA1=n_CA1, n_units=n_cond, tau=tau, lr=lr_MSP)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -169,9 +167,9 @@ class M_Hip(nn.Module):
         self.reset()
 
         dev = a_target.device
-        zeros_ca3  = torch.zeros(self.n_CA3,  device=dev)
-        zeros_ecin = torch.zeros(self.n_items, device=dev)
-        a_ecout    = torch.zeros(self.n_items, device=dev)
+        zeros_ca3  = torch.zeros(self.ca3.n_units,  device=dev)
+        zeros_ecin = torch.zeros(self.ecin.n_units, device=dev)
+        a_ecout    = torch.zeros(self.ecout.n_units, device=dev)
 
         # Q1 — ECin-dominant (theta trough; encoding; cycles 1–25)
         # CA3→CA1 zeroed; DG and CA3 still run to build their states.
@@ -298,9 +296,9 @@ class M_Hip(nn.Module):
         self.ecin.reset()
         self.reset()                       # resets DG, CA3, CA1, ECout Euler state
 
-        clamp       = torch.zeros(self.n_items)
+        clamp       = torch.zeros(self.ecin.n_units)
         clamp[item_idx] = 1.0
-        zeros_ecout = torch.zeros(self.n_items)  # suppress big-loop back-projection
+        zeros_ecout = torch.zeros(self.ecout.n_units)  # suppress big-loop back-projection
 
         initial_snap = None
         for cycle in range(n_settled):
@@ -320,18 +318,18 @@ class M_Hip(nn.Module):
         n_initial: int = 20,
         n_settled: int = 80,
     ) -> tuple:
-        """Test all n_items via run_evaluation; return stacked activation matrices.
+        """Test all n_cond items via run_evaluation; return stacked activation matrices.
 
         Returns
         -------
-        initial_mats : dict[layer] → ndarray float32 (n_items, n_units)
-        settled_mats : dict[layer] → ndarray float32 (n_items, n_units)
+        initial_mats : dict[layer] → ndarray float32 (n_cond, n_units)
+        settled_mats : dict[layer] → ndarray float32 (n_cond, n_units)
         """
         import numpy as np
         layers = ('ecin', 'dg', 'ca3', 'ca1', 'ecout')
         init_lists = {l: [] for l in layers}
         sett_lists = {l: [] for l in layers}
-        for i in range(self.n_items):
+        for i in range(self.n_cond):
             init, sett = self.run_evaluation(i, n_initial, n_settled)
             for l in layers:
                 init_lists[l].append(init[l].detach().numpy())

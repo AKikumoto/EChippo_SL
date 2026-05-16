@@ -21,8 +21,8 @@ Connection diagram (Schapiro et al. 2017 §2.a):
     W_CA3_CA3  (n_CA3, n_CA3)     full (recurrent attractor)     │   │
     W_ECin_CA1 (n_ECin, n_CA1)    full (MSP)                     │   │
     W_CA3_CA1  (n_CA3, n_CA1)     full (TSP)                     │   │
-    W_ECout_CA1(n_ECin, n_CA1)    full (back-projection, Q4)     │   │
-    W_CA1_ECout(n_CA1, n_ECin)    full (output)                  │   │
+    W_ECout_CA1(n_ECout, n_CA1)   full (back-projection, Q4)     │   │
+    W_CA1_ECout(n_CA1, n_ECout)   full (output)                  │   │
 
 | Layer       | Description               | Role                                      |
 |-------------|---------------------------|-------------------------------------------|
@@ -158,7 +158,7 @@ class L_ECin(nn.Module):
         ----------
         n_units : int
             Number of ECin units.
-            Schapiro community task: 15 (= n_items; Schapiro 2017 Fig. 1).
+            Schapiro community task: 15 (= n_cond; Schapiro 2017 Fig. 1).
             K&M feature-coded: 8 (4 rule units + 4 stim units).
         n_ECout : int or None
             Number of ECout units. If given, W_ECout (ECout→ECin back-
@@ -317,7 +317,7 @@ class L_ECin(nn.Module):
 #   presentation of two such items for two minus phases and one plus phase."
 #
 # [Parameters]:
-#   n_DG        : int   (default: 100 — scale to task; Schapiro uses larger)
+#   n_units     : int   (default: 100 — scale to task; Schapiro uses larger)
 #   k_frac      : float (default: 0.01 → 1% sparsity; Schapiro 2017 §2.2)
 #   ecin_frac   : float (default: 0.25 → each DG unit gets 25% of ECin)
 #   tau         : float (default: 0.1; Leabra default; O'Reilly & Munakata 2000)
@@ -340,7 +340,7 @@ class L_DG(nn.Module):
     def __init__(
         self,
         n_input: int,
-        n_DG: int = 100,
+        n_units: int = 100,
         k_frac: float = 0.01,
         ecin_frac: float = 0.25,
         tau: float = 0.1,
@@ -351,9 +351,9 @@ class L_DG(nn.Module):
         Parameters
         ----------
         n_input : int
-            ECin output dimension (= n_items).
-        n_DG : int
-            Number of DG units. Schapiro (2017): large relative to n_items.
+            ECin output dimension (= n_cond).
+        n_units : int
+            Number of DG units. Schapiro (2017): large relative to n_cond.
         k_frac : float
             Fraction of active units after kWTA. Schapiro (2017) §2.2: ~0.01.
         ecin_frac : float
@@ -367,17 +367,17 @@ class L_DG(nn.Module):
             TSP learning rate. Go reimplementation: 0.4. (Schapiro 2017 §2.b)
         """
         super().__init__()
-        self.n_input = n_input
-        self.n_DG = n_DG
-        self.k_frac = k_frac
+        self.n_input  = n_input
+        self.n_units  = n_units
+        self.k_frac   = k_frac
         self.ecin_frac = ecin_frac
-        self.tau = tau
+        self.tau      = tau
         self.use_euler = use_euler
-        self.lr = lr
+        self.lr       = lr
 
         # Sparse connectivity mask: 1 where connection exists, 0 otherwise.
         # Schapiro (2017) §2.a.v: sparse projections randomized per network.
-        mask = (torch.rand(n_input, n_DG) < ecin_frac).float()
+        mask = (torch.rand(n_input, n_units) < ecin_frac).float()
         self.register_buffer('mask', mask)
 
         # W_ECin_DG: sparse feedforward weights, TSP pathway
@@ -386,13 +386,13 @@ class L_DG(nn.Module):
         # Init: uniform(0.25, 0.75) — SI Table 2 'default'; see util._W_INIT.
         # requires_grad=False: CHL updates via .data +=; use W.requires_grad_(True)
         # at the model level to switch to backprop mode when needed.
-        self.W = F_init_weights((n_input, n_DG), 'default', mask=mask)
+        self.W = F_init_weights((n_input, n_units), 'default', mask=mask)
 
         # Separate Euler state (membrane potential) and firing rate (output)
         # In emergent/Leabra, Vm is integrated by Euler; y = F(Vm) is the output.
         # Feeding y (not Vm) into recurrent input is the correct Leabra formulation.
-        self.register_buffer('_Vm', torch.zeros(n_DG))   # membrane potential (Euler state)
-        self.register_buffer('_y',  torch.zeros(n_DG))   # firing rate (kWTA output)
+        self.register_buffer('_Vm', torch.zeros(n_units))   # membrane potential (Euler state)
+        self.register_buffer('_y',  torch.zeros(n_units))   # firing rate (kWTA output)
 
     @property
     def activity(self) -> torch.Tensor:
@@ -512,7 +512,7 @@ class L_DG(nn.Module):
 #   reset() before each trial's Q1 minus phase.
 #
 # [Parameters]:
-#   n_CA3    : int   (default: 50)
+#   n_units  : int   (default: 50)
 #   k_frac   : float (default: 0.06; Schapiro 2017 SI Table 1)
 #   dg_frac  : float (default: 0.05; mossy fibre; Schapiro 2017 §2.a.iii)
 #   tau      : float (default: 0.1; Leabra default)
@@ -538,7 +538,7 @@ class L_CA3(nn.Module):
         self,
         n_DG: int,
         n_ECin: int,
-        n_CA3: int = 50,
+        n_units: int = 50,
         k_frac: float = 0.06,
         dg_frac: float = 0.05,
         ecin_frac: float = 0.25,
@@ -553,7 +553,7 @@ class L_CA3(nn.Module):
             DG output dimension.
         n_ECin : int
             ECin dimension (perforant path direct input).
-        n_CA3 : int
+        n_units : int
             Number of CA3 units.
         k_frac : float
             kWTA sparsity. Schapiro (2017) SI Table 1: 0.06.
@@ -571,18 +571,18 @@ class L_CA3(nn.Module):
             TSP learning rate. Go reimplementation: 0.4. (Schapiro 2017 §2.b)
         """
         super().__init__()
-        self.n_DG = n_DG
-        self.n_ECin = n_ECin
-        self.n_CA3 = n_CA3
-        self.k_frac = k_frac
+        self.n_DG    = n_DG
+        self.n_ECin  = n_ECin
+        self.n_units = n_units
+        self.k_frac  = k_frac
         self.dg_frac = dg_frac
         self.ecin_frac = ecin_frac
-        self.tau = tau
+        self.tau     = tau
         self.use_euler = use_euler
-        self.lr = lr
+        self.lr      = lr
 
         # Sparse mossy fibre mask: 5% of DG → CA3 connections exist
-        mask_ff = (torch.rand(n_DG, n_CA3) < dg_frac).float()
+        mask_ff = (torch.rand(n_DG, n_units) < dg_frac).float()
         self.register_buffer('mask_ff', mask_ff)
 
         # W_DG_CA3: feedforward mossy fibre weights, TSP pathway
@@ -591,28 +591,28 @@ class L_CA3(nn.Module):
         # High narrow range ensures DG drives a unique CA3 pattern even through 5% connectivity.
         # requires_grad=False: CHL updates via .data +=; use W_ff.requires_grad_(True)
         # at the model level to switch to backprop mode when needed.
-        self.W_ff = F_init_weights((n_DG, n_CA3), 'mossy_fiber', mask=mask_ff)
+        self.W_ff = F_init_weights((n_DG, n_units), 'mossy_fiber', mask=mask_ff)
 
         # Sparse perforant path mask: 25% of ECin → CA3 connections exist
-        mask_ecin = (torch.rand(n_ECin, n_CA3) < ecin_frac).float()
+        mask_ecin = (torch.rand(n_ECin, n_units) < ecin_frac).float()
         self.register_buffer('mask_ecin', mask_ecin)
 
         # W_ECin_CA3: perforant path direct ECin → CA3 (25% sparse), TSP pathway
         # Schapiro (2017) §2.a.iii: "direct EC input to CA3 (25% connectivity)"
         # Init: uniform(0.25, 0.75) — SI Table 2 'default'; see util._W_INIT.
-        self.W_ecin = F_init_weights((n_ECin, n_CA3), 'default', mask=mask_ecin)
+        self.W_ecin = F_init_weights((n_ECin, n_units), 'default', mask=mask_ecin)
 
         # W_CA3_CA3: recurrent weights (enable pattern completion)
         # Schapiro (2017) §2.a.iii: "fully connected (every unit to every other unit)"
         # Init: uniform(0.25, 0.75) — SI Table 2 'default'; see util._W_INIT.
         # requires_grad=False: CHL updates via .data +=; use W_rec.requires_grad_(True)
         # at the model level to switch to backprop mode when needed.
-        self.W_rec = F_init_weights((n_CA3, n_CA3), 'default')
+        self.W_rec = F_init_weights((n_units, n_units), 'default')
 
         # Separate Euler state (membrane potential) and firing rate.
         # Recurrent input is y (firing rate), not Vm (membrane potential).
-        self.register_buffer('_Vm', torch.zeros(n_CA3))   # membrane potential (Euler state)
-        self.register_buffer('_y',  torch.zeros(n_CA3))   # firing rate (kWTA output)
+        self.register_buffer('_Vm', torch.zeros(n_units))   # membrane potential (Euler state)
+        self.register_buffer('_y',  torch.zeros(n_units))   # firing rate (kWTA output)
 
     @property
     def activity(self) -> torch.Tensor:
@@ -752,9 +752,10 @@ class L_CA3(nn.Module):
 #   reset() before each trial's Q1.
 #
 # [Parameters]:
-#   n_items  : int   (= n_ECin = n_ECout)
+#   n_ecin   : int   (ECin input dimension)
+#   n_ecout  : int   (ECout back-projection dimension; default = n_ecin)
 #   n_CA3    : int   (CA3 output dimension)
-#   n_CA1    : int   (default: 50)
+#   n_units  : int   (default: 50)
 #   k_frac   : float (default: 0.25; Schapiro 2017 SI Table 1)
 #   tau      : float (default: 0.1; Leabra default)
 #   use_euler: bool  (default: True)
@@ -778,23 +779,26 @@ class L_CA1(nn.Module):
 
     def __init__(
         self,
-        n_items: int,
+        n_ecin: int,
         n_CA3: int,
-        n_CA1: int = 50,
+        n_units: int = 50,
         k_frac: float = 0.25,
         tau: float = 0.1,
         use_euler: bool = True,
         lr_MSP: float = 0.05,
         lr_TSP: float = 0.4,
+        n_ecout: int | None = None,
     ):
         """
         Parameters
         ----------
-        n_items : int
-            ECin / ECout dimension.
+        n_ecin : int
+            ECin input dimension.
+        n_ecout : int or None
+            ECout back-projection dimension. Defaults to n_ecin.
         n_CA3 : int
             CA3 output dimension.
-        n_CA1 : int
+        n_units : int
             Number of CA1 units.
         k_frac : float
             kWTA sparsity. Schapiro (2017) SI Table 1: 0.25.
@@ -808,11 +812,13 @@ class L_CA1(nn.Module):
             TSP learning rate (CA3→CA1). Go reimplementation: 0.4.
         """
         super().__init__()
-        self.n_items = n_items
-        self.n_CA3 = n_CA3
-        self.n_CA1 = n_CA1
-        self.k_frac = k_frac
-        self.tau = tau
+        n_ecout = n_ecin if n_ecout is None else n_ecout
+        self.n_ecin  = n_ecin
+        self.n_ecout = n_ecout
+        self.n_CA3   = n_CA3
+        self.n_units = n_units
+        self.k_frac  = k_frac
+        self.tau     = tau
         self.use_euler = use_euler
         # Learning rates are per weight matrix, not per CA1 unit.
         # The same CA1 unit j receives synapses from both ECin (W_ECin[:, j]) and CA3
@@ -829,22 +835,22 @@ class L_CA1(nn.Module):
         # lr_MSP = 0.05 (Go reimplementation; Schapiro 2017 §2.b)
         # Init: uniform(0.25, 0.75) — SI Table 2 'default'; see util._W_INIT.
         # Forward scale: NET_SCALE['ecin_ca1'] = 3.0 (SI Table 2 abs=3).
-        self.W_ECin = F_init_weights((n_items, n_CA1), 'default')
+        self.W_ECin = F_init_weights((n_ecin, n_units), 'default')
 
         # TSP: CA3 → CA1 (fast; learns individual episodes)
         # Schapiro (2017) §2.a.iv: "CA3 then has a fully connected projection to CA1"
         # lr_TSP = 0.4 (Go reimplementation; Schapiro 2017 §2.b)
         # Init: uniform(0.25, 0.75) — SI Table 2 'default'; see util._W_INIT.
-        self.W_CA3 = F_init_weights((n_CA3, n_CA1), 'default')
+        self.W_CA3 = F_init_weights((n_CA3, n_units), 'default')
 
         # Back-projection from ECout (plus-phase teaching signal)
         # Schapiro (2017) §2.a.iv: ECout → CA1 "fully connected"
         # Completes the "big loop": ECin → CA1 → ECout → CA1
         # Init: uniform(0.25, 0.75) — SI Table 2 'default'; see util._W_INIT.
-        self.W_ECout = F_init_weights((n_items, n_CA1), 'default')
+        self.W_ECout = F_init_weights((n_ecout, n_units), 'default')
 
-        self.register_buffer('_Vm', torch.zeros(n_CA1))   # membrane potential (Euler state)
-        self.register_buffer('_y',  torch.zeros(n_CA1))   # firing rate (kWTA output)
+        self.register_buffer('_Vm', torch.zeros(n_units))   # membrane potential (Euler state)
+        self.register_buffer('_y',  torch.zeros(n_units))   # firing rate (kWTA output)
 
     @property
     def activity(self) -> torch.Tensor:
@@ -984,7 +990,7 @@ class L_CA1(nn.Module):
 #
 # [Parameters]:
 #   n_CA1   : int   (CA1 output dimension)
-#   n_items : int   (= n_ECin; reconstruction target)
+#   n_units : int   (reconstruction target dimension)
 #   k       : int   (default: 2; absolute count; Schapiro 2017 §2.a.ii)
 #   tau     : float (default: 0.1; Leabra default)
 #   use_euler: bool (default: True)
@@ -1008,7 +1014,7 @@ class L_ECout(nn.Module):
     def __init__(
         self,
         n_CA1: int,
-        n_items: int,
+        n_units: int,
         k: int = 2,
         tau: float = 0.1,
         use_euler: bool = True,
@@ -1019,8 +1025,8 @@ class L_ECout(nn.Module):
         ----------
         n_CA1 : int
             CA1 output dimension.
-        n_items : int
-            ECout output dimension (= n_items; matches ECin).
+        n_units : int
+            ECout output dimension.
         k : int
             Absolute number of active units after kWTA.
             Schapiro (2017) §2.a.ii: k=2. Default 2.
@@ -1032,12 +1038,12 @@ class L_ECout(nn.Module):
             Output learning rate. Go reimplementation: 0.05. (Schapiro 2017 §2.b)
         """
         super().__init__()
-        self.n_CA1 = n_CA1
-        self.n_items = n_items
-        self.k = k           # Schapiro (2017) §2.a.ii: k=2 (absolute)
-        self.tau = tau
+        self.n_CA1   = n_CA1
+        self.n_units = n_units
+        self.k       = k           # Schapiro (2017) §2.a.ii: k=2 (absolute)
+        self.tau     = tau
         self.use_euler = use_euler
-        self.lr = lr
+        self.lr      = lr
 
         # W_CA1_ECout: CA1 → ECout feedforward; fully connected
         # Schapiro (2017) §2.a.iv: "fully connected projections in the MSP
@@ -1045,10 +1051,10 @@ class L_ECout(nn.Module):
         # Init: uniform(0.25, 0.75) — SI Table 2 'default'; see util._W_INIT.
         # requires_grad=False: CHL updates via .data +=; use W.requires_grad_(True)
         # at the model level to switch to backprop mode when needed.
-        self.W = F_init_weights((n_CA1, n_items), 'default')
+        self.W = F_init_weights((n_CA1, n_units), 'default')
 
-        self.register_buffer('_Vm', torch.zeros(n_items))   # membrane potential (Euler state)
-        self.register_buffer('_y',  torch.zeros(n_items))   # firing rate (kWTA output)
+        self.register_buffer('_Vm', torch.zeros(n_units))   # membrane potential (Euler state)
+        self.register_buffer('_y',  torch.zeros(n_units))   # firing rate (kWTA output)
 
     @property
     def activity(self) -> torch.Tensor:
@@ -1079,9 +1085,9 @@ class L_ECout(nn.Module):
 
         In plus phase, use clamp() instead — do not call forward().
         """
-        # net input from CA1: W is (n_CA1, n_items), a_CA1 is (n_CA1,)
+        # net input from CA1: W is (n_CA1, n_units), a_CA1 is (n_CA1,)
         # Schapiro (2017) §2.a.iv; O'Reilly & Munakata (2000) Ch. 2.
-        net = a_CA1 @ self.W                   # (n_items,)
+        net = a_CA1 @ self.W                   # (n_units,)
 
         # Euler integration on membrane potential; O'Reilly & Munakata (2000) Ch. 2
         if self.use_euler:
@@ -1091,7 +1097,7 @@ class L_ECout(nn.Module):
 
         # Firing rate: nxx1 then kWTA absolute k=2; Schapiro (2017) §2.a.ii
         vm = F_nxx1(self._Vm)
-        k_from_bottom = self.n_items - self.k + 1
+        k_from_bottom = self.n_units - self.k + 1
         threshold = torch.kthvalue(vm, k_from_bottom).values
         self._y = vm * (vm >= threshold).float()
         return self._y
@@ -1106,7 +1112,7 @@ class L_ECout(nn.Module):
         ΔW = lr * (a_CA1_plus ⊗ a_ECout_plus − a_CA1_minus ⊗ a_ECout_minus)
         O'Reilly & Munakata (2000) Ch. 4 Eq. 4.3; Schapiro (2017) §2.b.
         """
-        # W is (n_CA1, n_items): outer(a_CA1, a_ECout) has correct shape.
+        # W is (n_CA1, n_units): outer(a_CA1, a_ECout) has correct shape.
         delta_plus  = torch.outer(a_CA1_plus,  a_ECout_plus)
         delta_minus = torch.outer(a_CA1_minus, a_ECout_minus)
         self.W.data += self.lr * (delta_plus - delta_minus)

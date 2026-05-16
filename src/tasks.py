@@ -211,7 +211,9 @@ class T_PairDataset(Dataset):
             Random seed.
         """
         self.n_steps     = n_steps
+        self.n_pairs     = n_pairs
         self.n_items     = n_pairs * 2
+        self.pairs       = [(2 * k, 2 * k + 1) for k in range(n_pairs)]
         self.interleaved = interleaved
         self.device      = device
 
@@ -236,6 +238,40 @@ class T_PairDataset(Dataset):
         self._items       = torch.tensor(items,       dtype=torch.long, device=self.device)
         self._next_items  = torch.tensor(next_items,  dtype=torch.long, device=self.device)
         self._pair_labels = torch.tensor(pair_labels, dtype=torch.long, device=self.device)
+
+    def rsa_masks(self) -> Dict[str, np.ndarray]:
+        """Boolean masks for same-pair vs cross-pair item comparisons.
+
+        Returns
+        -------
+        dict with keys:
+          'same'  : bool ndarray (n_items, n_items) — paired items (off-diagonal)
+          'cross' : bool ndarray (n_items, n_items) — all other item pairs
+        """
+        pair_set = set(self.pairs) | {(b, a) for a, b in self.pairs}
+        n = self.n_items
+        same  = np.array([[(i, j) in pair_set and i != j for j in range(n)]
+                          for i in range(n)])
+        cross = np.array([[i != j and (i, j) not in pair_set for j in range(n)]
+                          for i in range(n)])
+        return {'same': same, 'cross': cross}
+
+    def output_prob_by_epoch(self, ecout_arr: np.ndarray) -> np.ndarray:
+        """Mean P(ECout_partner > 0.5) at each epoch, averaged over pairs and reps.
+
+        Parameters
+        ----------
+        ecout_arr : ndarray (N_REPS, N_EPOCHS, n_items, n_items)
+
+        Returns
+        -------
+        ndarray (N_EPOCHS,)
+        """
+        n_epochs = ecout_arr.shape[1]
+        return np.array([
+            np.mean([(ecout_arr[:, ep, a, b] > 0.5).mean() for a, b in self.pairs])
+            for ep in range(n_epochs)
+        ])
 
     def __len__(self) -> int:
         return self.n_steps
@@ -309,15 +345,19 @@ class T_ChainDataset(Dataset):
         device:   str           = 'cpu',
         seed:     Optional[int] = None,
     ):
-        ipc           = 3                         # items per triad (fixed)
-        self.n_items  = n_triads * ipc
-        self.n_steps  = n_steps
-        self.device   = device
+        ipc                = 3                         # items per triad (fixed)
+        self.n_triads      = n_triads
+        self.ipc           = ipc
+        self.n_items       = n_triads * ipc
+        self.n_steps       = n_steps
+        self.device        = device
 
         # Direct pairs: (3k, 3k+1) and (3k+1, 3k+2) for each triad k
-        pairs = [(t * ipc + i, t * ipc + i + 1)
-                 for t in range(n_triads)
-                 for i in range(ipc - 1)]
+        # Transitive pairs (never trained, test only): (3k, 3k+2)
+        self.direct_pairs = [(t * ipc + i, t * ipc + i + 1)
+                             for t in range(n_triads) for i in range(ipc - 1)]
+        self.trans_pairs  = [(t * ipc, t * ipc + 2) for t in range(n_triads)]
+        pairs = self.direct_pairs
 
         rng  = np.random.default_rng(seed)
         idxs = rng.integers(len(pairs), size=n_steps)
@@ -331,6 +371,49 @@ class T_ChainDataset(Dataset):
         t_idx = torch.arange(n_steps)
         self._item_oh  [t_idx, torch.tensor(items)]      = 1.0
         self._target_oh[t_idx, torch.tensor(next_items)] = 1.0
+
+    def rsa_masks(self) -> Dict[str, np.ndarray]:
+        """Boolean masks for direct, transitive, and unrelated item pairs.
+
+        Returns
+        -------
+        dict with keys:
+          'direct'     : bool ndarray (n_items, n_items) — trained A↔B and B↔C pairs
+          'transitive' : bool ndarray (n_items, n_items) — untrained A↔C (two-hop)
+          'unrelated'  : bool ndarray (n_items, n_items) — cross-triad, off-diagonal
+        """
+        n          = self.n_items
+        ipc        = self.ipc
+        direct_set = set(self.direct_pairs) | {(b, a) for a, b in self.direct_pairs}
+        trans_set  = set(self.trans_pairs)  | {(b, a) for a, b in self.trans_pairs}
+        direct = np.array([[(i, j) in direct_set for j in range(n)] for i in range(n)])
+        trans  = np.array([[(i, j) in trans_set  for j in range(n)] for i in range(n)])
+        unrel  = np.array([[i != j
+                            and (i, j) not in direct_set
+                            and (i, j) not in trans_set
+                            and i // ipc != j // ipc
+                            for j in range(n)] for i in range(n)])
+        return {'direct': direct, 'transitive': trans, 'unrelated': unrel}
+
+    def output_prob(self, ecout_mat: np.ndarray) -> Dict[str, float]:
+        """P(ECout_target > 0.5) for direct and transitive pairs.
+
+        Parameters
+        ----------
+        ecout_mat : ndarray (N_REPS, n_items, n_items)
+            Settled ECout activity for one epoch (typically the final epoch).
+            ecout_mat[r, a, b] = ECout unit b activity when presenting item a, rep r.
+
+        Returns
+        -------
+        dict with keys 'direct' and 'transitive' (float each)
+        """
+        return {
+            'direct':     float(np.mean([(ecout_mat[:, a, b] > 0.5).mean()
+                                         for a, b in self.direct_pairs])),
+            'transitive': float(np.mean([(ecout_mat[:, a, b] > 0.5).mean()
+                                         for a, b in self.trans_pairs])),
+        }
 
     def __len__(self) -> int:
         return self.n_steps
@@ -533,9 +616,11 @@ class T_CommunityGraphDataset(Dataset):
         seed : int, optional
             Random seed.
         """
-        self.n_steps = n_steps
-        self.n_items = n_communities * items_per_community
-        self.device  = device
+        self.n_steps             = n_steps
+        self.n_communities       = n_communities
+        self.items_per_community = items_per_community
+        self.n_items             = n_communities * items_per_community
+        self.device              = device
 
         self._items      : torch.Tensor = None
         self._next_items : torch.Tensor = None
@@ -567,6 +652,65 @@ class T_CommunityGraphDataset(Dataset):
         self._items       = torch.tensor(items,       dtype=torch.long, device=self.device)
         self._next_items  = torch.tensor(next_items,  dtype=torch.long, device=self.device)
         self._communities = torch.tensor(communities, dtype=torch.long, device=self.device)
+
+    @property
+    def internal_items(self) -> List[int]:
+        """Items with only within-community edges (middle of each community).
+
+        In the ring topology, only the first and last item of each community
+        carry inter-community edges; all others are internal (degree = ipc-1).
+        """
+        ipc      = self.items_per_community
+        boundary = {c * ipc for c in range(self.n_communities)} | \
+                   {c * ipc + ipc - 1 for c in range(self.n_communities)}
+        return [i for i in range(self.n_items) if i not in boundary]
+
+    @property
+    def boundary_items(self) -> List[int]:
+        """Items carrying inter-community edges (first and last of each community)."""
+        ipc = self.items_per_community
+        return sorted({c * ipc for c in range(self.n_communities)} |
+                      {c * ipc + ipc - 1 for c in range(self.n_communities)})
+
+    def rsa_masks(self) -> Dict[str, np.ndarray]:
+        """Boolean masks for within- vs between-community item pairs.
+
+        Returns
+        -------
+        dict with keys:
+          'within'  : bool ndarray (n_items, n_items) — same community, off-diagonal
+          'between' : bool ndarray (n_items, n_items) — different communities
+        """
+        ipc          = self.items_per_community
+        community_of = np.array([i // ipc for i in range(self.n_items)])
+        within  = (community_of[:, None] == community_of[None, :]) & \
+                  ~np.eye(self.n_items, dtype=bool)
+        between = (community_of[:, None] != community_of[None, :])
+        return {'within': within, 'between': between}
+
+    def output_prob_by_epoch(self, ecout_arr: np.ndarray) -> Dict[str, np.ndarray]:
+        """P(max ECout > 0.5) per epoch for internal vs boundary items.
+
+        Parameters
+        ----------
+        ecout_arr : ndarray (N_REPS, N_EPOCHS, n_items, n_items)
+            ecout_arr[r, ep, i, :] = ECout activity vector when presenting item i.
+
+        Returns
+        -------
+        dict with keys 'internal' and 'boundary', each ndarray (N_EPOCHS,)
+        """
+        n_epochs = ecout_arr.shape[1]
+
+        def prob(items: List[int]) -> np.ndarray:
+            return np.array([
+                np.mean([(ecout_arr[:, ep, i, :].max(axis=1) > 0.5).mean()
+                         for i in items])
+                for ep in range(n_epochs)
+            ])
+
+        return {'internal': prob(self.internal_items),
+                'boundary': prob(self.boundary_items)}
 
     def __len__(self) -> int:
         return self.n_steps

@@ -10,7 +10,6 @@ NET_SCALE     : forward-pass scale factors per projection
 
 Analysis (used in notebooks and cluster/aggregate.py)
 ------------------------------------------------------
-F_item_mean_vecs      : mean CA1 activity per item (normalized)
 F_community_masks     : within- / between-community boolean masks
 F_rsa_by_epoch        : RSA scores across all epochs of a run_simulation result
 F_extract_rsa         : Pearson r similarity matrices across reps for a chosen snapshot
@@ -203,38 +202,6 @@ def F_init_weights(
 # These functions operate on run_simulation output (numpy float32 arrays).
 
 
-def F_item_mean_vecs(
-    ca1_acts: np.ndarray,
-    ecin_acts: np.ndarray,
-) -> torch.Tensor:
-    """Mean CA1 activity vector per item, L2-normalized.
-
-    Computes the average CA1 pattern across all trials in which each item
-    was active in ECin, then normalizes each row to unit length.
-    Items with no active trials fall back to the global mean.
-
-    Parameters
-    ----------
-    ca1_acts  : float32 array (n_trials, n_CA1)   — one epoch of CA1 activity
-    ecin_acts : float32 array (n_trials, n_items)  — one epoch of ECin activity
-
-    Returns
-    -------
-    Tensor (n_items, n_CA1), L2-normalized row vectors.
-    """
-    ca1  = torch.as_tensor(ca1_acts)
-    ecin = torch.as_tensor(ecin_acts)
-    n_items = ecin.shape[1]
-
-    vecs = []
-    for i in range(n_items):
-        mask = ecin[:, i] > 0.5
-        vecs.append(ca1[mask].mean(0) if mask.sum() > 0 else ca1.mean(0))
-    mat = torch.stack(vecs)                                # (n_items, n_CA1)
-    return mat / (mat.norm(dim=1, keepdim=True) + 1e-8)   # L2-normalize
-
-
-
 def F_community_masks(
     n_items: int,
     items_per_community: int,
@@ -268,7 +235,6 @@ def F_rsa_by_epoch(
 ) -> tuple[list[float], list[float]]:
     """Within- and between-community RSA scores for every epoch.
 
-    Convenience wrapper around F_item_mean_vecs and F_community_masks.
     Operates on run_simulation output.
 
     Parameters
@@ -295,12 +261,15 @@ def F_rsa_by_epoch(
 
     within_scores, between_scores = [], []
     for ep in range(n_epochs):
-        vecs = F_item_mean_vecs(result['acts']['ca1']['m'][ep],
-                                result['acts']['ecin']['m'][ep])
-        rdm = rsatoolbox.rdm.calc_rdm(
-            rsatoolbox.data.Dataset(vecs.numpy().astype(np.float64)),
-            method='correlation',
+        ca1  = result['acts']['ca1']['m'][ep]   # (n_trials, n_CA1)
+        ecin = result['acts']['ecin']['m'][ep]  # (n_trials, n_items)
+        item_labels = np.argmax(ecin, axis=1)   # (n_trials,)
+        ds = rsatoolbox.data.Dataset(
+            ca1.astype(np.float64),
+            obs_descriptors={'item': item_labels},
         )
+        ds_avg = rsatoolbox.data.average_dataset_by(ds, 'item')
+        rdm = rsatoolbox.rdm.calc_rdm(ds_avg, method='correlation')
         sim = 1.0 - rdm.get_matrices()[0]
         within_scores.append(float(sim[wm].mean()))
         between_scores.append(float(sim[bm].mean()))

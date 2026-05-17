@@ -13,8 +13,7 @@ Analysis (used in notebooks and cluster/aggregate.py)
 F_item_mean_vecs      : mean CA1 activity per item (normalized)
 F_community_masks     : within- / between-community boolean masks
 F_rsa_by_epoch        : RSA scores across all epochs of a run_simulation result
-F_pearson_sim_mat     : pairwise Pearson r similarity matrix (Schapiro 2017 Figs 2–4)
-F_extract_rsa         : stack Pearson r matrices across reps for a chosen snapshot
+F_extract_rsa         : Pearson r similarity matrices across reps for a chosen snapshot
 F_pattern_sim_by_mask : mean ± SE Pearson r per layer per boolean mask, across reps
 
 Notes
@@ -291,34 +290,22 @@ def F_rsa_by_epoch(
     """
     n_epochs = result['acts']['ca1']['m'].shape[0]
     within_mask, between_mask = F_community_masks(n_items, items_per_community)
+    wm = within_mask.numpy()
+    bm = between_mask.numpy()
 
     within_scores, between_scores = [], []
     for ep in range(n_epochs):
-        vecs    = F_item_mean_vecs(result['acts']['ca1']['m'][ep],
-                                   result['acts']['ecin']['m'][ep])
-        sim_mat = vecs @ vecs.T
-        within_scores.append(sim_mat[within_mask].mean().item())
-        between_scores.append(sim_mat[between_mask].mean().item())
+        vecs = F_item_mean_vecs(result['acts']['ca1']['m'][ep],
+                                result['acts']['ecin']['m'][ep])
+        rdm = rsatoolbox.rdm.calc_rdm(
+            rsatoolbox.data.Dataset(vecs.numpy().astype(np.float64)),
+            method='correlation',
+        )
+        sim = 1.0 - rdm.get_matrices()[0]
+        within_scores.append(float(sim[wm].mean()))
+        between_scores.append(float(sim[bm].mean()))
 
     return within_scores, between_scores
-
-
-def F_pearson_sim_mat(acts: np.ndarray) -> np.ndarray:
-    """Pairwise Pearson r similarity matrix — Schapiro (2017) Figs 2–4.
-
-    Parameters
-    ----------
-    acts : ndarray (n_items, n_units)
-
-    Returns
-    -------
-    ndarray (n_items, n_items), values in [−1, 1].
-    """
-    rdm = rsatoolbox.rdm.calc_rdm(
-        rsatoolbox.data.Dataset(acts.astype(np.float64)),
-        method='correlation',
-    )
-    return 1.0 - rdm.get_matrices()[0]
 
 
 def F_extract_rsa(
@@ -347,7 +334,13 @@ def F_extract_rsa(
     # normalize: n_reps=1 backward-compat squeezes the rep dimension
     evals = [results['eval']] if n_reps == 1 else results['eval']
     return {
-        l: np.stack([F_pearson_sim_mat(snap_fn(evals[r])[l]) for r in range(n_reps)])
+        l: np.stack([
+            1.0 - rsatoolbox.rdm.calc_rdm(
+                rsatoolbox.data.Dataset(snap_fn(evals[r])[l].astype(np.float64)),
+                method='correlation',
+            ).get_matrices()[0]
+            for r in range(n_reps)
+        ])
         for l in layers
     }
 

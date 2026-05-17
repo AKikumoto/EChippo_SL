@@ -126,7 +126,7 @@ from util import F_nxx1, F_kWTA, F_init_weights, NET_SCALE
 #   True: Euler settling. Required when ECout back-projection modulates ECin.
 #
 # [Inhibition — Schapiro (2017) §2.a.ii]:
-#   k = 2 absolute. For n_items=15: 2/15 ≈ 13% active.
+#   k = 2 absolute. For n_cond=15: 2/15 ≈ 13% active.
 #   §2.a.ii: "ECin and ECout each had inhibition set so that two units
 #   could be active at a time (k = 2), unless otherwise noted."
 #
@@ -276,7 +276,7 @@ class L_ECin(nn.Module):
 #   similar."
 #
 # [Inputs]:
-#   - a_ECin : (n_items,) — ECin activity
+#   - a_ECin : (n_cond,) — ECin activity
 #
 # [Outputs]:
 #   - activity : (n_DG,) — sparse (~1%) float tensor via kWTA
@@ -699,9 +699,9 @@ class L_CA3(nn.Module):
 #   also not as sparse."
 #
 # [Inputs]:
-#   - a_ECin  : (n_items,) — ECin activity (MSP)
+#   - a_ECin  : (n_cond,) — ECin activity (MSP)
 #   - a_CA3   : (n_CA3,)  — CA3 activity (TSP)
-#   - a_ECout : (n_items,) — ECout activity (plus phase only; None in minus phase)
+#   - a_ECout : (n_cond,) — ECout activity (plus phase only; None in minus phase)
 #
 # [Outputs]:
 #   - activity : (n_CA1,) — ~25% active via kWTA
@@ -949,7 +949,7 @@ class L_CA1(nn.Module):
 #   - a_CA1 : (n_CA1,) — CA1 activity (feedforward)
 #
 # [Outputs — minus phase]:
-#   - activity : (n_items,) — CA1's predicted reconstruction of current item
+#   - activity : (n_cond,) — CA1's predicted reconstruction of current item
 #
 # [Plus phase — clamp to target]:
 #   ECout activity is overwritten by the target item's ECin pattern.
@@ -964,7 +964,7 @@ class L_CA1(nn.Module):
 #   k = 2 (absolute count). Matches ECin.
 #   §2.a.ii: "ECin and ECout each had inhibition set so that two units could
 #   be active at a time (k = 2), unless otherwise noted."
-#   For n_items=15: 2/15 ≈ 13% active.
+#   For n_cond=15: 2/15 ≈ 13% active.
 #   [Note: for associative inference (§3.c), k is raised to 3 during testing.]
 #
 # [Big-loop recurrence]:
@@ -1149,7 +1149,7 @@ class L_PFC(nn.Module):
     Parameters
     ----------
     n_ECout : int
-        Input size (ECout activity; = n_items).
+        Input size (ECout activity; = n_cond).
     n_hidden : int
         PFC recurrent hidden units.
     n_ECin : int

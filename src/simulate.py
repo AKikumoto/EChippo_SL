@@ -17,8 +17,8 @@ model
 
 dataloader
     Iterable yielding dicts per trial with at minimum:
-        'item_onehot'   : (n_items,) tensor — current item one-hot
-        'target_onehot' : (n_items,) tensor — next item one-hot
+        'item_onehot'   : (n_cond,) tensor — current item one-hot
+        'target_onehot' : (n_cond,) tensor — next item one-hot
     Any T_*Dataset from tasks.py satisfies this contract.
 
 dataloader_fn

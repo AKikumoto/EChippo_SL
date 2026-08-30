@@ -270,6 +270,7 @@ class M_Hip(nn.Module):
         item_idx: int,
         n_initial: int = 20,
         n_settled: int = 80,
+        no_recurrence: bool = False,
     ) -> tuple:
         """§2.d testing: present one item in isolation; return (initial_snap, settled_snap).
 
@@ -284,9 +285,12 @@ class M_Hip(nn.Module):
 
         Parameters
         ----------
-        item_idx  : int  — item to present (0-based index into ECin)
-        n_initial : int  — cycle at which initial snapshot is taken (default 20)
-        n_settled : int  — total settling cycles (default 80)
+        item_idx      : int  — item to present (0-based index into ECin)
+        n_initial     : int  — cycle at which initial snapshot is taken (default 20)
+        n_settled     : int  — total settling cycles (default 80)
+        no_recurrence : bool — if True, zero CA3→CA3 (W_rec) during evaluation;
+                               models the "without recurrence" test condition
+                               (Schapiro 2017 Fig. 4a)
 
         Returns
         -------
@@ -294,31 +298,45 @@ class M_Hip(nn.Module):
         settled_snap : dict keys 'ecin','dg','ca3','ca1','ecout'  — snapshot at cycle n_settled
         """
         self.ecin.reset()
-        self.reset()                       # resets DG, CA3, CA1, ECout Euler state
+        self.reset()
+
+        saved_W_rec = None
+        if no_recurrence:
+            saved_W_rec = self.ca3.W_rec.data.clone()
+            self.ca3.W_rec.data.zero_()
 
         clamp       = torch.zeros(self.ecin.n_units)
         clamp[item_idx] = 1.0
-        zeros_ecout = torch.zeros(self.ecout.n_units)  # suppress big-loop back-projection
+        zeros_ecout = torch.zeros(self.ecout.n_units)
 
         initial_snap = None
         for cycle in range(n_settled):
             a_ecin  = self.ecin(clamp, zeros_ecout)
             a_dg    = self.dg(a_ecin)
             a_ca3   = self.ca3(a_dg, a_ecin)
-            a_ca1   = self.ca1(a_ecin, a_ca3)  # both MSP and TSP; no ECout back-proj
+            a_ca1   = self.ca1(a_ecin, a_ca3)
             a_ecout = self.ecout(a_ca1)
             if cycle == n_initial - 1:
                 initial_snap = self._snap(a_ecin, a_dg, a_ca3, a_ca1, a_ecout)
 
         settled_snap = self._snap(a_ecin, a_dg, a_ca3, a_ca1, a_ecout)
+
+        if saved_W_rec is not None:
+            self.ca3.W_rec.data.copy_(saved_W_rec)
+
         return initial_snap, settled_snap
 
     def run_evaluation_all(
         self,
         n_initial: int = 20,
         n_settled: int = 80,
+        no_recurrence: bool = False,
     ) -> tuple:
         """Test all n_cond items via run_evaluation; return stacked activation matrices.
+
+        Parameters
+        ----------
+        no_recurrence : bool — passed to run_evaluation (zeros CA3→CA3 during test)
 
         Returns
         -------
@@ -330,7 +348,8 @@ class M_Hip(nn.Module):
         init_lists = {l: [] for l in layers}
         sett_lists = {l: [] for l in layers}
         for i in range(self.n_cond):
-            init, sett = self.run_evaluation(i, n_initial, n_settled)
+            init, sett = self.run_evaluation(i, n_initial, n_settled,
+                                             no_recurrence=no_recurrence)
             for l in layers:
                 init_lists[l].append(init[l].detach().numpy())
                 sett_lists[l].append(sett[l].detach().numpy())

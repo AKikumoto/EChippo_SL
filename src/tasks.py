@@ -273,6 +273,44 @@ class T_PairDataset(Dataset):
             for ep in range(n_epochs)
         ])
 
+    def output_prob_detail_by_epoch(self, ecout_arr: np.ndarray) -> Dict[str, np.ndarray]:
+        """Per-transition-type output probability curves (Schapiro 2017 Fig. 2c/f).
+
+        For each pair (A, B) averaged over all pairs and reps:
+          A→B : P(ECout_B > 0.5 | input A)  — partner activation
+          B→A : P(ECout_A > 0.5 | input B)  — backward activation
+          A→A : P(ECout_A > 0.5 | input A)  — self-activation
+          B→B : P(ECout_B > 0.5 | input B)  — self-activation
+          incorrect : mean P(ECout_k > 0.5 | input A) for k ∉ {A, B}
+
+        Parameters
+        ----------
+        ecout_arr : ndarray (N_REPS, N_EPOCHS, n_items, n_items)
+            ecout_arr[r, ep, i, j] = ECout unit j activity when presenting item i.
+
+        Returns
+        -------
+        dict with keys 'A_B', 'B_A', 'A_A', 'B_B', 'incorrect',
+        each ndarray (N_EPOCHS,)
+        """
+        n_epochs = ecout_arr.shape[1]
+        keys = ['A_B', 'B_A', 'A_A', 'B_B', 'incorrect']
+        accum = {k: [] for k in keys}
+        for ep in range(n_epochs):
+            vals = {k: [] for k in keys}
+            for A, B in self.pairs:
+                others = [k for k in range(self.n_items) if k != A and k != B]
+                vals['A_B'].append((ecout_arr[:, ep, A, B] > 0.5).mean())
+                vals['B_A'].append((ecout_arr[:, ep, B, A] > 0.5).mean())
+                vals['A_A'].append((ecout_arr[:, ep, A, A] > 0.5).mean())
+                vals['B_B'].append((ecout_arr[:, ep, B, B] > 0.5).mean())
+                vals['incorrect'].append(
+                    np.mean([(ecout_arr[:, ep, A, k] > 0.5).mean() for k in others])
+                )
+            for k in keys:
+                accum[k].append(float(np.mean(vals[k])))
+        return {k: np.array(v) for k, v in accum.items()}
+
     def __len__(self) -> int:
         return self.n_steps
 
@@ -688,24 +726,77 @@ class T_CommunityGraphDataset(Dataset):
         between = (community_of[:, None] != community_of[None, :])
         return {'within': within, 'between': between}
 
+    def rsa_masks_detail(self) -> Dict[str, np.ndarray]:
+        """Four-way boolean masks for detailed pattern similarity analysis.
+
+        Schapiro (2017) Fig. 3e: six similarity categories across DG/CA3/CA1.
+        Categories separate within-community pairs by boundary vs. internal node,
+        and across-community pairs by direct ring connection vs. indirect.
+
+        Returns
+        -------
+        dict with keys:
+          'within_internal' : same community, BOTH nodes internal (not boundary)
+          'within_boundary' : same community, AT LEAST ONE node is boundary
+          'across_boundary' : different communities, directly connected by ring edge
+          'across_other'    : different communities, not directly connected
+        """
+        ipc = self.items_per_community
+        nc  = self.n_communities
+        n   = self.n_items
+
+        community_of = np.array([i // ipc for i in range(n)])
+        same_comm = (community_of[:, None] == community_of[None, :])
+        off_diag  = ~np.eye(n, dtype=bool)
+
+        # Boundary items: first and last of each community (carry ring edges)
+        boundary_set = set()
+        for c in range(nc):
+            boundary_set.add(c * ipc)
+            boundary_set.add(c * ipc + ipc - 1)
+        is_boundary = np.array([i in boundary_set for i in range(n)])
+
+        # Ring connections: last of c ↔ first of (c+1)%nc
+        ring = np.zeros((n, n), dtype=bool)
+        for c in range(nc):
+            last  = c * ipc + (ipc - 1)
+            first = ((c + 1) % nc) * ipc
+            ring[last, first] = ring[first, last] = True
+
+        both_internal = (~is_boundary[:, None]) & (~is_boundary[None, :])
+
+        return {
+            'within_internal': same_comm & off_diag & both_internal,
+            'within_boundary': same_comm & off_diag & ~both_internal,
+            'across_boundary': (~same_comm) & ring,
+            'across_other':    (~same_comm) & (~ring),
+        }
+
     def output_prob_by_epoch(self, ecout_arr: np.ndarray) -> Dict[str, np.ndarray]:
-        """P(max ECout > 0.5) per epoch for internal vs boundary items.
+        """P(argmax ECout is from same community) per epoch for internal vs boundary items.
+
+        Schapiro (2017) Fig. 3c: probability of activating units from same community.
+        Chance = items_per_community / n_items (= 0.33 for 3 communities × 5 items).
 
         Parameters
         ----------
         ecout_arr : ndarray (N_REPS, N_EPOCHS, n_items, n_items)
-            ecout_arr[r, ep, i, :] = ECout activity vector when presenting item i.
+            ecout_arr[r, ep, i, :] = ECout activity when presenting item i.
 
         Returns
         -------
         dict with keys 'internal' and 'boundary', each ndarray (N_EPOCHS,)
         """
         n_epochs = ecout_arr.shape[1]
+        ipc = self.items_per_community
+        community_of = np.array([i // ipc for i in range(self.n_items)])
 
         def prob(items: List[int]) -> np.ndarray:
             return np.array([
-                np.mean([(ecout_arr[:, ep, i, :].max(axis=1) > 0.5).mean()
-                         for i in items])
+                np.mean([
+                    (community_of[np.argmax(ecout_arr[:, ep, i, :], axis=1)] == community_of[i]).mean()
+                    for i in items
+                ])
                 for ep in range(n_epochs)
             ])
 

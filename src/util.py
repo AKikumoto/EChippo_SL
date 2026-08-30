@@ -268,11 +268,15 @@ def F_rsa_by_epoch(
             ca1.astype(np.float64),
             obs_descriptors={'item': item_labels},
         )
-        ds_avg = rsatoolbox.data.average_dataset_by(ds, 'item')
-        rdm = rsatoolbox.rdm.calc_rdm(ds_avg, method='correlation')
+        # unique_items: which item indices actually appeared this epoch (may be < n_items)
+        avg_mat, unique_items, _ = rsatoolbox.data.average_dataset_by(ds, 'item')
+        unique_items = np.array(unique_items)
+        wm_sub = wm[np.ix_(unique_items, unique_items)]
+        bm_sub = bm[np.ix_(unique_items, unique_items)]
+        rdm = rsatoolbox.rdm.calc_rdm(rsatoolbox.data.Dataset(avg_mat), method='correlation')
         sim = 1.0 - rdm.get_matrices()[0]
-        within_scores.append(float(sim[wm].mean()))
-        between_scores.append(float(sim[bm].mean()))
+        within_scores.append(float(sim[wm_sub].mean()))
+        between_scores.append(float(sim[bm_sub].mean()))
 
     return within_scores, between_scores
 
